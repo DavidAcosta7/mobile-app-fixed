@@ -1,0 +1,14 @@
+import 'react-native-url-polyfill/auto';
+import './global.css';
+import { registerRootComponent } from 'expo';
+import { ExpoRoot } from 'expo-router';
+import React from 'react';
+
+// @ts-ignore - require.context is provided by Metro bundler
+const ctx = require.context('./app');
+
+export function App(): React.JSX.Element {
+  return React.createElement(ExpoRoot, { context: ctx });
+}
+
+registerRootComponent(App);
