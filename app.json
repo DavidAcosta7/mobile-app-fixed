@@ -24,6 +24,8 @@
       },
       "permissions": [
         "POST_NOTIFICATIONS",
+        "SCHEDULE_EXACT_ALARM",
+        "POST_NOTIFICATIONS",
         "SCHEDULE_EXACT_ALARM"
       ]
     },
@@ -45,6 +47,12 @@
       "eas": {
         "projectId": "33c963c1-5760-4fa9-bdf6-6554dbdc3118"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/33c963c1-5760-4fa9-bdf6-6554dbdc3118"
     }
   }
 }
