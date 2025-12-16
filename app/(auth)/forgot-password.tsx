@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 
@@ -71,7 +72,7 @@ export default function ForgotPasswordScreen() {
         {/* Logo/Header */}
         <View style={styles.header}>
           <View style={styles.logoContainer}>
-            <Text style={styles.logoIcon}>🔐</Text>
+            <Ionicons name="lock-closed" size={40} color="#FFFFFF" />
           </View>
           <Text style={styles.title}>Restablecer Contraseña</Text>
           <Text style={styles.subtitle}>
@@ -154,9 +155,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
-  },
-  logoIcon: {
-    fontSize: 40,
   },
   title: {
     fontSize: 28,

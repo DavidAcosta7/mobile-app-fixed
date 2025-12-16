@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 interface StatCardProps {
   label: string;
@@ -14,12 +15,26 @@ const COLORS = {
   green: '#10B981',
 };
 
+const ICON_MAP: Record<string, keyof typeof Ionicons.glyphMap> = {
+  '💳': 'card',
+  '⏱️': 'time',
+  '🔴': 'alert-circle',
+  '💰': 'cash',
+  // Mapeo directo de nombres de iconos
+  'card': 'card',
+  'time': 'time',
+  'alert-circle': 'alert-circle',
+  'cash': 'cash',
+};
+
 export function StatCard({ label, value, icon, color }: StatCardProps) {
+  const iconName = ICON_MAP[icon] || 'help-circle-outline';
+  
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.label}>{label}</Text>
-        <Text style={styles.icon}>{icon}</Text>
+        <Ionicons name={iconName as any} size={20} color={COLORS[color]} />
       </View>
       <Text style={[styles.value, { color: COLORS[color] }]}>
         {value}
@@ -32,15 +47,15 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 16,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 3,
     flex: 1,
-    minWidth: '45%',
-    marginBottom: 12,
+    minWidth: '48%',
+    marginBottom: 8,
   },
   header: {
     flexDirection: 'row',
@@ -52,11 +67,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
-  icon: {
-    fontSize: 24,
-  },
   value: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: 'bold',
   },
 });

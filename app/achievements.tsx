@@ -1,5 +1,7 @@
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
-import { Card } from '../../components/ui/Card';
+import { Ionicons } from '@expo/vector-icons';
+import { Card } from '../components/ui/Card';
+import { Header } from '../components/Header';
 
 export default function AchievementsScreen() {
   const achievements = [
@@ -7,7 +9,7 @@ export default function AchievementsScreen() {
       id: 1, 
       title: 'Primer pago', 
       desc: 'Completa tu primer pago a tiempo', 
-      icon: '🎯', 
+      icon: 'target' as keyof typeof Ionicons.glyphMap, 
       locked: true, 
       xp: 50,
       progress: 0,
@@ -17,7 +19,7 @@ export default function AchievementsScreen() {
       id: 2, 
       title: 'Racha 3 días', 
       desc: 'Paga a tiempo 3 días consecutivos', 
-      icon: '🔥', 
+      icon: 'flame' as keyof typeof Ionicons.glyphMap, 
       locked: true, 
       xp: 100,
       progress: 0,
@@ -27,7 +29,7 @@ export default function AchievementsScreen() {
       id: 3, 
       title: 'Racha 7 días', 
       desc: 'Paga a tiempo 7 días consecutivos', 
-      icon: '⭐', 
+      icon: 'star' as keyof typeof Ionicons.glyphMap, 
       locked: true, 
       xp: 200,
       progress: 0,
@@ -37,7 +39,7 @@ export default function AchievementsScreen() {
       id: 4, 
       title: 'Racha 30 días', 
       desc: 'Paga a tiempo 30 días consecutivos', 
-      icon: '👑', 
+      icon: 'diamond' as keyof typeof Ionicons.glyphMap, 
       locked: true, 
       xp: 500,
       progress: 0,
@@ -47,10 +49,14 @@ export default function AchievementsScreen() {
 
   return (
     <View style={styles.container}>
+      <Header />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>🏆 Logros</Text>
+          <View style={styles.titleContainer}>
+            <Ionicons name="trophy" size={32} color="#2563EB" style={styles.titleIcon} />
+            <Text style={styles.title}>Logros</Text>
+          </View>
           <Text style={styles.subtitle}>
             Desbloquea logros pagando a tiempo
           </Text>
@@ -68,9 +74,11 @@ export default function AchievementsScreen() {
                   styles.iconContainer,
                   achievement.locked ? styles.iconLocked : styles.iconUnlocked
                 ]}>
-                  <Text style={styles.achievementIconText}>
-                    {achievement.locked ? '🔒' : achievement.icon}
-                  </Text>
+                  <Ionicons 
+                    name={achievement.locked ? 'lock-closed' : achievement.icon} 
+                    size={28} 
+                    color={achievement.locked ? '#9CA3AF' : '#10B981'} 
+                  />
                 </View>
                 <View style={styles.achievementInfo}>
                   <Text style={styles.achievementTitle}>{achievement.title}</Text>
@@ -125,11 +133,18 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 24,
   },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  titleIcon: {
+    marginRight: 8,
+  },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
     color: '#111827',
-    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
@@ -172,9 +187,6 @@ const styles = StyleSheet.create({
   },
   iconUnlocked: {
     backgroundColor: '#D1FAE5',
-  },
-  achievementIconText: {
-    fontSize: 28,
   },
   achievementInfo: {
     flex: 1,
@@ -230,3 +242,4 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
 });
+

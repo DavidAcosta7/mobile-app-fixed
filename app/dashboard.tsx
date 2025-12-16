@@ -1,17 +1,67 @@
 import { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert, Modal, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useAuth } from '../../hooks/useAuth';
-import { supabase } from '../../lib/supabase';
-import { StatCard } from '../../components/ui/StatCard';
-import { TabBar } from '../../components/ui/TabBar';
-import { Card } from '../../components/ui/Card';
+import { View, Text, ScrollView, StyleSheet, Alert, Modal, TextInput, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
+import { StatCard } from '../components/ui/StatCard';
+import { TabBar } from '../components/ui/TabBar';
+import { Card } from '../components/ui/Card';
+import { userService } from '../services/users.service';
+import { Header } from '../components/Header';
+
+// Helper function to map emojis or icon names to valid Ionicons names
+const getIconName = (icon: string | null | undefined): keyof typeof Ionicons.glyphMap => {
+  if (!icon) return 'card';
+  
+  // Map emojis to Ionicons
+  const emojiMap: Record<string, keyof typeof Ionicons.glyphMap> = {
+    '💳': 'card',
+    '🤙': 'call',
+    '📱': 'phone-portrait',
+    '💡': 'bulb',
+    '🎵': 'musical-notes',
+    '🏠': 'home',
+    '🚗': 'car',
+    '🍔': 'restaurant',
+    '⚡': 'flash',
+    '💰': 'cash',
+    '🛒': 'cart',
+    '🏥': 'medical',
+    '🎮': 'game-controller',
+    '👕': 'shirt',
+    '🎓': 'school',
+    '✈️': 'airplane',
+    '🏋️': 'barbell',
+    '🎬': 'film',
+    '📚': 'library',
+    '🎨': 'color-palette',
+  };
+  
+  // If it's an emoji, map it
+  if (emojiMap[icon]) {
+    return emojiMap[icon];
+  }
+  
+  // If it's already a valid icon name (or close to one), try to use it
+  // Otherwise, default to 'card'
+  const validIconNames = ['card', 'cash', 'time', 'alert-circle', 'home', 'trophy', 'settings'];
+  if (validIconNames.includes(icon.toLowerCase())) {
+    return icon.toLowerCase() as keyof typeof Ionicons.glyphMap;
+  }
+  
+  // Default fallback
+  return 'card';
+};
 
 export default function DashboardScreen() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('Todos');
   const [showModal, setShowModal] = useState(false);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isFirstLogin, setIsFirstLogin] = useState(false);
 
   // Form states
   const [paymentName, setPaymentName] = useState('');
@@ -21,6 +71,10 @@ export default function DashboardScreen() {
   const [category, setCategory] = useState('');
   const [icon, setIcon] = useState('');
   const [editingPayment, setEditingPayment] = useState<any>(null);
+  const [paymentUrl, setPaymentUrl] = useState('');
+  const [deepLink, setDeepLink] = useState('');
+  const [showCustomAppModal, setShowCustomAppModal] = useState(false);
+  const [customAppPackage, setCustomAppPackage] = useState('');
 
   const loadPayments = async () => {
     try {
@@ -45,6 +99,14 @@ export default function DashboardScreen() {
       loadPayments();
     }
   }, [user?.id]);
+
+  // Verificar si es primer login y no tiene pagos
+  useEffect(() => {
+    if (user?.first_login && payments.length === 0 && !loading) {
+      setIsFirstLogin(true);
+      setShowModal(true);
+    }
+  }, [user?.first_login, payments.length, loading]);
 
   const handleSavePayment = async () => {
     // Validaciones
@@ -76,7 +138,9 @@ export default function DashboardScreen() {
             category: category,
             due_date: parsedDate.toISOString(),
             selected_date: parsedDate.toISOString(),
-            icon: icon || '💳',
+            icon: icon || 'card',
+            payment_url: paymentUrl || null,
+            deep_link: deepLink || null,
           })
           .eq('id', editingPayment.id);
 
@@ -95,26 +159,68 @@ export default function DashboardScreen() {
             due_date: parsedDate.toISOString(),
             selected_date: parsedDate.toISOString(),
             status: 'PENDING',
-            icon: icon || '💳',
+            icon: icon || 'card',
             description: '',
             auto_debit: false,
+            payment_url: paymentUrl || null,
+            deep_link: deepLink || null,
           });
 
         if (error) throw error;
-        Alert.alert('Éxito', 'Pago agregado correctamente');
+        
+        // Si es el primer pago y es primer login, actualizar first_login y redirigir
+        if (isFirstLogin && !editingPayment) {
+          // Actualizar first_login a false
+          await userService.update(user.id, { first_login: false });
+          // Refrescar el usuario para obtener los datos actualizados
+          await refreshUser();
+          
+          // Cerrar modal y resetear estados
+          setShowModal(false);
+          setIsFirstLogin(false);
+          setPaymentName('');
+          setAmount('');
+          setDueDate('');
+          setCategory('');
+          setIcon('');
+          setPaymentUrl('');
+          setDeepLink('');
+          
+          Alert.alert(
+            '¡Excelente!',
+            'Tu primer pago ha sido registrado. Ahora configura tus notificaciones para recibir recordatorios.',
+            [
+              {
+                text: 'Configurar Notificaciones',
+                onPress: () => {
+                  // Navegar a notificaciones
+                  router.push('/notifications');
+                },
+              },
+            ]
+          );
+        } else {
+          Alert.alert('Éxito', 'Pago agregado correctamente');
+          // Resetear form solo si no es primer login
+          setShowModal(false);
+        }
       }
 
       // Resetear form
-      setShowModal(false);
+      if (!isFirstLogin) {
+        setShowModal(false);
+      }
       setPaymentName('');
       setAmount('');
       setDueDate('');
       setCategory('');
       setIcon('');
+      setPaymentUrl('');
+      setDeepLink('');
       setEditingPayment(null);
       
-      // Recargar pagos
-      loadPayments();
+      // Recargar pagos y reprogramar notificaciones
+      await loadPayments();
     } catch (error) {
       console.error('Error saving payment:', error);
       Alert.alert('Error', 'No se pudo guardar el pago');
@@ -130,6 +236,8 @@ export default function DashboardScreen() {
     setCurrency(payment.currency);
     setCategory(payment.category);
     setIcon(payment.icon || '');
+    setPaymentUrl(payment.payment_url || '');
+    setDeepLink(payment.deep_link || '');
     const date = new Date(payment.due_date);
     setDueDate(`${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`);
     setShowModal(true);
@@ -164,6 +272,53 @@ export default function DashboardScreen() {
     );
   };
 
+  const handlePayment = async (payment: any) => {
+    try {
+      // Si tiene deep_link (app), abrir app
+      if (payment.deep_link) {
+        const canOpen = await Linking.canOpenURL(payment.deep_link);
+        if (canOpen) {
+          await Linking.openURL(payment.deep_link);
+        } else {
+          Alert.alert(
+            'App no disponible',
+            'La aplicación configurada no está instalada. ¿Deseas usar el link web?',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Abrir Web',
+                onPress: () => {
+                  if (payment.payment_url) {
+                    Linking.openURL(payment.payment_url);
+                  }
+                }
+              }
+            ]
+          );
+        }
+      } 
+      // Si tiene payment_url (link), abrir navegador
+      else if (payment.payment_url) {
+        const canOpen = await Linking.canOpenURL(payment.payment_url);
+        if (canOpen) {
+          await Linking.openURL(payment.payment_url);
+        } else {
+          Alert.alert('Error', 'No se puede abrir el link');
+        }
+      }
+      // Si no tiene nada configurado
+      else {
+        Alert.alert(
+          'Sin configurar',
+          'Este pago no tiene un método de pago configurado. Edítalo para agregar un link o app.'
+        );
+      }
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo abrir el método de pago');
+      console.error('Error opening payment:', error);
+    }
+  };
+
   const filteredPayments = payments.filter((payment) => {
     if (activeTab === 'Todos') return true;
     if (activeTab === 'Pendientes') return payment.status === 'PENDING';
@@ -173,14 +328,15 @@ export default function DashboardScreen() {
   });
 
   const stats = [
-    { label: 'Total Pagos', value: payments.length.toString(), icon: '💳', color: 'blue' as const },
-    { label: 'Pendientes', value: payments.filter(p => p.status === 'PENDING').length.toString(), icon: '⏱️', color: 'orange' as const },
-    { label: 'Urgentes', value: payments.filter(p => p.status === 'URGENT').length.toString(), icon: '🔴', color: 'red' as const },
-    { label: 'Total Mensual', value: `$${payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}`, icon: '💰', color: 'green' as const },
+    { label: 'Total Pagos', value: payments.length.toString(), icon: 'card', color: 'blue' as const },
+    { label: 'Pendientes', value: payments.filter(p => p.status === 'PENDING').length.toString(), icon: 'time', color: 'orange' as const },
+    { label: 'Urgentes', value: payments.filter(p => p.status === 'URGENT').length.toString(), icon: 'alert-circle', color: 'red' as const },
+    { label: 'Total Mensual', value: `$${payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}`, icon: 'cash', color: 'green' as const },
   ];
 
   return (
     <View style={styles.container}>
+      <Header />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
@@ -212,7 +368,7 @@ export default function DashboardScreen() {
               onPress={() => setShowModal(true)}
               activeOpacity={0.8}
             >
-              <Text style={styles.addButtonText}>+ Agregar Pago</Text>
+              <Text style={styles.addButtonText}>+ Agregar</Text>
             </TouchableOpacity>
           </View>
 
@@ -238,7 +394,12 @@ export default function DashboardScreen() {
               {filteredPayments.map((payment) => (
                 <Card key={payment.id} style={styles.paymentCard}>
                   <View style={styles.paymentHeader}>
-                    <Text style={styles.paymentIcon}>{payment.icon || '💳'}</Text>
+                    <Ionicons 
+                      name={getIconName(payment.icon)} 
+                      size={24} 
+                      color="#2563EB" 
+                      style={styles.paymentIcon}
+                    />
                     <View style={styles.paymentInfo}>
                       <Text style={styles.paymentName}>{payment.name}</Text>
                       <Text style={styles.paymentCategory}>{payment.category}</Text>
@@ -256,16 +417,23 @@ export default function DashboardScreen() {
                         style={styles.paymentActionButton}
                         onPress={() => handleEditPayment(payment)}
                       >
-                        <Text style={styles.paymentActionText}>✏️ Editar</Text>
+                        <Ionicons name="create-outline" size={18} color="#2563EB" style={{ marginRight: 4 }} />
+                        <Text style={styles.paymentActionText}>Editar</Text>
                       </TouchableOpacity>
                       <TouchableOpacity 
                         style={[styles.paymentActionButton, styles.deleteButton]}
                         onPress={() => handleDeletePayment(payment)}
                       >
-                        <Text style={styles.paymentActionText}>🗑️</Text>
+                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
                       </TouchableOpacity>
                     </View>
                   </View>
+                  <TouchableOpacity 
+                    style={styles.payButton}
+                    onPress={() => handlePayment(payment)}
+                  >
+                    <Text style={styles.payButtonText}>💳 Pagar</Text>
+                  </TouchableOpacity>
                 </Card>
               ))}
             </View>
@@ -308,31 +476,47 @@ export default function DashboardScreen() {
         visible={showModal}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowModal(false)}
+        onRequestClose={isFirstLogin ? undefined : () => setShowModal(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             {/* Header del Modal */}
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {editingPayment ? 'Editar Pago' : 'Agregar Nuevo Pago'}
+                {isFirstLogin 
+                  ? '¡Bienvenido a FluxPay! 👋' 
+                  : editingPayment 
+                    ? 'Editar Pago' 
+                    : 'Agregar Nuevo Pago'}
               </Text>
-              <TouchableOpacity onPress={() => {
-                setShowModal(false);
-                setEditingPayment(null);
-                setPaymentName('');
-                setAmount('');
-                setDueDate('');
-                setCategory('');
-                setIcon('');
-              }}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
+              {!isFirstLogin && (
+                <TouchableOpacity onPress={() => {
+                  setShowModal(false);
+                  setEditingPayment(null);
+                  setPaymentName('');
+                  setAmount('');
+                  setDueDate('');
+                  setCategory('');
+                  setIcon('');
+                  setPaymentUrl('');
+                  setDeepLink('');
+                }}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <ScrollView style={styles.modalContent}>
-              <Text style={styles.modalSubtitle}>
-                Completa la información del pago mensual
-              </Text>
+              {isFirstLogin ? (
+                <View style={styles.welcomeContainer}>
+                  <Text style={styles.welcomeText}>
+                    Para comenzar, registra tu primer pago. Te ayudaremos a gestionar todos tus pagos y recibirás recordatorios para que nunca olvides realizar tus pagos a tiempo.
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.modalSubtitle}>
+                  Completa la información del pago mensual
+                </Text>
+              )}
 
               {/* Nombre del pago */}
               <Text style={styles.inputLabel}>
@@ -412,41 +596,189 @@ export default function DashboardScreen() {
               <Text style={styles.inputLabel}>Icono (opcional)</Text>
               <TextInput
                 style={styles.input}
-                placeholder="ej: 📱 💡 🎵"
+                placeholder="Nombre del icono (ej: phone, bulb, musical-notes)"
                 placeholderTextColor="#9CA3AF"
                 value={icon}
                 onChangeText={setIcon}
               />
 
-              {/* Botones */}
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
+              {/* Configurar Enlace de Pago */}
+              <Text style={styles.sectionHeader}>🔗 Configurar enlace de pago</Text>
+              <Text style={styles.sectionSubtitle}>
+                Elige cómo quieres pagar esta cuenta
+              </Text>
+
+              {/* Opción 1: Link Web */}
+              <Text style={styles.inputLabel}>Link de pago (URL)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="https://ejemplo.com/pagar"
+                value={paymentUrl}
+                onChangeText={setPaymentUrl}
+                placeholderTextColor="#9CA3AF"
+                keyboardType="url"
+                autoCapitalize="none"
+              />
+              <Text style={styles.inputHint}>
+                💡 Ejemplo: Link del banco, PSE, o página de pago
+              </Text>
+
+              {/* Selector de App */}
+              <Text style={styles.inputLabel}>Abrir app para pagar</Text>
+              <View style={styles.appSelectorContainer}>
+                <TouchableOpacity 
+                  style={styles.appSelectorButton}
                   onPress={() => {
-                    setShowModal(false);
-                    setEditingPayment(null);
-                    setPaymentName('');
-                    setAmount('');
-                    setDueDate('');
-                    setCategory('');
-                    setIcon('');
+                    Alert.alert(
+                      'Seleccionar App',
+                      'Elige la app que se abrirá al presionar "Pagar"',
+                      [
+                        {
+                          text: 'Bancolombia',
+                          onPress: () => setDeepLink('bancolombia://')
+                        },
+                        {
+                          text: 'Nequi',
+                          onPress: () => setDeepLink('nequi://')
+                        },
+                        {
+                          text: 'Daviplata',
+                          onPress: () => setDeepLink('daviplata://')
+                        },
+                        {
+                          text: 'PSE',
+                          onPress: () => setDeepLink('pse://')
+                        },
+                        {
+                          text: 'Personalizado',
+                          onPress: () => {
+                            setShowCustomAppModal(true);
+                          }
+                        },
+                        { text: 'Cancelar', style: 'cancel' }
+                      ]
+                    );
                   }}
                 >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                  <Text style={styles.appSelectorText}>
+                    {deepLink ? `📱 ${deepLink}` : '📱 Seleccionar app...'}
+                  </Text>
                 </TouchableOpacity>
+                {deepLink && (
+                  <TouchableOpacity 
+                    style={styles.clearButton}
+                    onPress={() => setDeepLink('')}
+                  >
+                    <Text style={styles.clearButtonText}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <Text style={styles.inputHint}>
+                💡 Selecciona la app que se abrirá al presionar "Pagar"
+              </Text>
+
+              {/* Botones */}
+              <View style={styles.modalButtons}>
+                {!isFirstLogin && (
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => {
+                      setShowModal(false);
+                      setEditingPayment(null);
+                      setPaymentName('');
+                      setAmount('');
+                      setDueDate('');
+                      setCategory('');
+                      setIcon('');
+                      setPaymentUrl('');
+                      setDeepLink('');
+                    }}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancelar</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
-                  style={[styles.saveButton, loading && styles.saveButtonDisabled]}
+                  style={[
+                    styles.saveButton, 
+                    loading && styles.saveButtonDisabled,
+                    isFirstLogin && styles.saveButtonFullWidth
+                  ]}
                   onPress={handleSavePayment}
                   disabled={loading}
                 >
                   {loading ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.saveButtonText}>Guardar</Text>
+                    <Text style={styles.saveButtonText}>
+                      {isFirstLogin ? 'Registrar mi primer pago' : editingPayment ? 'Actualizar' : 'Guardar'}
+                    </Text>
                   )}
                 </TouchableOpacity>
               </View>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal App Personalizada */}
+      <Modal
+        visible={showCustomAppModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setShowCustomAppModal(false);
+          setCustomAppPackage('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { maxHeight: '50%', justifyContent: 'center' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>App Personalizada</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowCustomAppModal(false);
+                  setCustomAppPackage('');
+                }}
+              >
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalSubtitle}>
+                Ingresa el nombre del paquete (ej: com.ejemplo.app)
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="com.ejemplo.app"
+                value={customAppPackage}
+                onChangeText={setCustomAppPackage}
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="none"
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => {
+                    setShowCustomAppModal(false);
+                    setCustomAppPackage('');
+                  }}
+                >
+                  <Text style={styles.modalCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalSaveButton}
+                  onPress={() => {
+                    if (customAppPackage) {
+                      setDeepLink(customAppPackage);
+                    }
+                    setShowCustomAppModal(false);
+                    setCustomAppPackage('');
+                  }}
+                >
+                  <Text style={styles.modalSaveText}>Guardar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -497,14 +829,9 @@ const styles = StyleSheet.create({
   },
   addButton: {
     backgroundColor: '#2563EB',
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 16,
-    borderRadius: 12,
-    shadowColor: '#2563EB',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    borderRadius: 8,
   },
   addButtonText: {
     color: '#FFFFFF',
@@ -691,6 +1018,23 @@ const styles = StyleSheet.create({
   saveButtonDisabled: {
     opacity: 0.6,
   },
+  saveButtonFullWidth: {
+    flex: 1,
+    marginLeft: 0,
+  },
+  welcomeContainer: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2563EB',
+  },
+  welcomeText: {
+    fontSize: 15,
+    color: '#1E40AF',
+    lineHeight: 22,
+  },
   paymentCard: {
     marginBottom: 12,
     padding: 16,
@@ -701,7 +1045,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   paymentIcon: {
-    fontSize: 32,
     marginRight: 12,
   },
   paymentInfo: {
@@ -744,6 +1087,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#F3F4F6',
     borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   deleteButton: {
     backgroundColor: '#FEE2E2',
@@ -779,4 +1124,85 @@ const styles = StyleSheet.create({
     color: '#2563EB',
     fontWeight: '600',
   },
+  payButton: {
+    backgroundColor: '#10B981',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  payButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  sectionHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginTop: 20,
+    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  appSelectorContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  appSelectorButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+  },
+  appSelectorText: {
+    fontSize: 15,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  clearButton: {
+    backgroundColor: '#FEE2E2',
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clearButtonText: {
+    fontSize: 18,
+    color: '#991B1B',
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  modalSaveButton: {
+    flex: 1,
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  modalSaveText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
 });
+

@@ -1,6 +1,17 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, Alert, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView
+} from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth';
 
 export default function RegisterPage() {
@@ -9,34 +20,48 @@ export default function RegisterPage() {
   const [telefono, setTelefono] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const router = useRouter();
   const { signUp } = useAuth();
 
   const handleSubmit = async () => {
-    setError('');
+    if (!nombre || !email || !telefono || !password) {
+      Alert.alert('Error', 'Por favor completa todos los campos');
+      return;
+    }
 
     if (password.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres');
-      Alert.alert('Contraseña muy corta', 'La contraseña debe tener al menos 8 caracteres');
+      Alert.alert('Error', 'La contraseña debe tener al menos 8 caracteres');
       return;
     }
 
     if (telefono.length < 10) {
-      setError('El número de teléfono debe tener al menos 10 dígitos');
-      Alert.alert('Teléfono inválido', 'El número de teléfono debe tener al menos 10 dígitos');
+      Alert.alert('Error', 'El número de teléfono debe tener al menos 10 dígitos');
+      return;
+    }
+
+    // Validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      Alert.alert('Error', 'Por favor ingresa un email válido');
       return;
     }
 
     setLoading(true);
 
     try {
-      await signUp(email, password, nombre, telefono);
-      Alert.alert('Cuenta creada', 'Ya puedes iniciar sesión con tu cuenta');
-      router.replace('/(auth)/login');
+      await signUp(email.trim(), password, nombre.trim(), telefono.trim());
+      Alert.alert(
+        'Cuenta creada',
+        'Tu cuenta ha sido creada exitosamente. Ya puedes iniciar sesión.',
+        [
+          {
+            text: 'OK',
+            onPress: () => router.replace('/(auth)/login'),
+          },
+        ]
+      );
     } catch (err: any) {
       const errorMessage = err.message || 'Error al crear cuenta';
-      setError(errorMessage);
       Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
@@ -44,109 +69,232 @@ export default function RegisterPage() {
   };
 
   return (
-    <ScrollView className="flex-1 bg-gray-50">
-      <View className="flex-1 items-center justify-center p-5">
-        <View className="bg-white shadow-lg rounded-2xl p-6 w-full max-w-md">
-          <View className="items-center mb-6">
-            <View className="w-16 h-16 rounded-xl bg-blue-600 items-center justify-center mb-4">
-              <Text className="text-3xl">💳</Text>
-            </View>
-            <Text className="text-3xl font-bold text-gray-900 mb-2">Crear cuenta</Text>
-            <Text className="text-gray-600 text-center">
-              Comienza a gestionar tus pagos de forma inteligente
-            </Text>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Logo/Header */}
+        <View style={styles.header}>
+          <View style={styles.logoContainer}>
+            <Text style={styles.logoIcon}>💳</Text>
           </View>
-
-          {error && (
-            <View className="flex-row items-start gap-2 p-3 rounded-lg bg-red-50 mb-4">
-              <Text className="text-red-600 text-sm">{error}</Text>
-            </View>
-          )}
-
-          <View className="space-y-4">
-            <View>
-              <Text className="text-sm font-semibold text-gray-700 mb-2">Nombre completo</Text>
-              <TextInput
-                value={nombre}
-                onChangeText={setNombre}
-                placeholder="Juan Pérez"
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="words"
-                className="border border-gray-300 rounded-xl p-4 text-base bg-white"
-                editable={!loading}
-              />
-            </View>
-            <View>
-              <Text className="text-sm font-semibold text-gray-700 mb-2">Email</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="juan@example.com"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                className="border border-gray-300 rounded-xl p-4 text-base bg-white"
-                editable={!loading}
-              />
-            </View>
-            <View>
-              <Text className="text-sm font-semibold text-gray-700 mb-2">Número de teléfono</Text>
-              <TextInput
-                value={telefono}
-                onChangeText={(text) => setTelefono(text.replace(/[^\d+\s]/g, ''))}
-                placeholder="+57 300 123 4567"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="phone-pad"
-                className="border border-gray-300 rounded-xl p-4 text-base bg-white"
-                editable={!loading}
-              />
-              <Text className="text-xs text-gray-500 mt-1">
-                Incluye el código de país (ej: +57)
-              </Text>
-            </View>
-            <View>
-              <Text className="text-sm font-semibold text-gray-700 mb-2">Contraseña</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Mínimo 8 caracteres"
-                placeholderTextColor="#9CA3AF"
-                secureTextEntry
-                className="border border-gray-300 rounded-xl p-4 text-base bg-white"
-                editable={!loading}
-              />
-              <Text className="text-xs text-gray-500 mt-1">
-                Debe tener al menos 8 caracteres
-              </Text>
-            </View>
-          </View>
-
-          <View className="mt-6 space-y-4">
-            <TouchableOpacity
-              onPress={handleSubmit}
-              disabled={loading}
-              className={`rounded-xl p-4 items-center justify-center mb-4 ${
-                loading ? 'bg-gray-400 opacity-60' : 'bg-blue-600'
-              }`}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text className="text-white text-base font-semibold">
-                  Crear cuenta
-                </Text>
-              )}
-            </TouchableOpacity>
-            <Text className="text-sm text-center text-gray-600">
-              ¿Ya tienes cuenta?{' '}
-              <Link href="/(auth)/login" className="text-blue-600 font-semibold">
-                Inicia sesión
-              </Link>
-            </Text>
-          </View>
+          <Text style={styles.title}>FLUXPAY</Text>
+          <Text style={styles.subtitle}>Crea tu cuenta y gestiona tus pagos</Text>
         </View>
-      </View>
-    </ScrollView>
+
+        {/* Register Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Crear Cuenta</Text>
+          
+          {/* Nombre Input */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Nombre completo</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Juan Pérez"
+              placeholderTextColor="#9CA3AF"
+              value={nombre}
+              onChangeText={setNombre}
+              autoCapitalize="words"
+              editable={!loading}
+            />
+          </View>
+
+          {/* Email Input */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="tu@email.com"
+              placeholderTextColor="#9CA3AF"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+            />
+          </View>
+
+          {/* Teléfono Input */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Número de teléfono</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="+57 300 123 4567"
+              placeholderTextColor="#9CA3AF"
+              value={telefono}
+              onChangeText={(text) => setTelefono(text.replace(/[^\d+\s]/g, ''))}
+              keyboardType="phone-pad"
+              editable={!loading}
+            />
+            <Text style={styles.helpText}>Incluye el código de país (ej: +57)</Text>
+          </View>
+
+          {/* Password Input */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Contraseña</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="••••••••"
+              placeholderTextColor="#9CA3AF"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              editable={!loading}
+            />
+            <Text style={styles.helpText}>Mínimo 8 caracteres</Text>
+          </View>
+
+          {/* Register Button */}
+          <TouchableOpacity
+            style={[styles.registerButton, loading && styles.registerButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={loading}
+            activeOpacity={0.8}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.registerButtonText}>Crear Cuenta</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Login Link */}
+        <View style={styles.loginContainer}>
+          <Text style={styles.loginText}>¿Ya tienes una cuenta? </Text>
+          <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
+            <Text style={styles.loginLink}>Inicia sesión</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  logoContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  logoIcon: {
+    fontSize: 40,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 8,
+    letterSpacing: 1,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+    marginBottom: 20,
+  },
+  cardTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: '#111827',
+  },
+  helpText: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  registerButton: {
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 8,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  registerButtonDisabled: {
+    opacity: 0.6,
+  },
+  registerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  loginContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  loginText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  loginLink: {
+    fontSize: 14,
+    color: '#2563EB',
+    fontWeight: '600',
+  },
+});

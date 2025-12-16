@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -33,7 +34,12 @@ export default function LoginScreen() {
       Alert.alert('Bienvenido', 'Has iniciado sesión correctamente');
       router.replace('/(tabs)/dashboard');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Error al iniciar sesión');
+      const errorMessage = error.message || 'Error al iniciar sesión';
+      if (errorMessage.includes('suspendida')) {
+        Alert.alert('Cuenta Suspendida', errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -50,11 +56,12 @@ export default function LoginScreen() {
       >
         {/* Logo/Header */}
         <View style={styles.header}>
-          <View style={styles.logoContainer}>
-            <Text style={styles.logoIcon}>💳</Text>
-          </View>
-          <Text style={styles.title}>FLUXPAY</Text>
-          <Text style={styles.subtitle}>Gestiona tus pagos inteligentemente</Text>
+          <Image 
+            source={require('../../logo.png')}
+            style={styles.logo}
+            contentFit="contain"
+          />
+          <Text style={styles.subtitle}>No Olvides Nada</Text>
         </View>
 
         {/* Login Card */}
@@ -122,16 +129,6 @@ export default function LoginScreen() {
             <Text style={styles.registerLink}>Regístrate</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Test Credentials */}
-        <View style={styles.testCredentialsContainer}>
-          <View style={styles.testCredentialsHeader}>
-            <Text style={styles.testCredentialsIcon}>🔑</Text>
-            <Text style={styles.testCredentialsTitle}>Credenciales de prueba</Text>
-          </View>
-          <Text style={styles.testCredentialsText}>Admin: admin@fluxpay.com</Text>
-          <Text style={styles.testCredentialsText}>Contraseña: FluxPay2024!</Text>
-        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -146,39 +143,23 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: 20,
+    minHeight: '100%',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 40,
+    marginTop: 20,
   },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#2563EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    shadowColor: '#2563EB',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  logoIcon: {
-    fontSize: 40,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 8,
-    letterSpacing: 1,
+  logo: {
+    width: 180,
+    height: 180,
+    marginBottom: 24,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#6B7280',
     textAlign: 'center',
+    fontWeight: '500',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -259,33 +240,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2563EB',
     fontWeight: '600',
-  },
-  testCredentialsContainer: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 20,
-    marginBottom: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2563EB',
-  },
-  testCredentialsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  testCredentialsIcon: {
-    fontSize: 18,
-    marginRight: 8,
-  },
-  testCredentialsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  testCredentialsText: {
-    fontSize: 13,
-    color: '#374151',
-    marginBottom: 4,
   },
 });
