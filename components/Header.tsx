@@ -1,163 +1,295 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Image, Platform, StatusBar } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
 
 export function Header() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const { user, signOut } = useAuth();
+  const [showThemeModal, setShowThemeModal] = useState(false);
+  const { user, signOut, refreshUser } = useAuth();
   const router = useRouter();
+  const { mode, resolvedMode, setMode, theme } = useTheme();
 
   const handleLogout = async () => {
     setShowProfileMenu(false);
     await signOut();
   };
 
-  const isAdmin = user?.user_metadata?.role === 'ADMIN';
+  const displayName = user?.name || 'Usuario';
+  const displayEmail = user?.email || '';
+  const level = user?.financial_level ?? 1;
+  const xp = user?.experience_points ?? 0;
 
   return (
-    <View style={styles.header}>
-      {/* Logo */}
-      <View style={styles.logoContainer}>
-        <Text style={styles.logo}>💳</Text>
-        <Text style={styles.logoText}>FLUXPAY</Text>
-      </View>
+    <SafeAreaView
+      edges={['top']}
+      style={[
+        styles.safeArea,
+        {
+          paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) + 10 : 10,
+          backgroundColor: theme.card,
+        },
+      ]}
+    >
+      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }] }>
+        {/* Logo */}
+        <View style={styles.logoContainer}>
+          <Image
+            source={require('../logo.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+        </View>
 
-      {/* Right Actions */}
-      <View style={styles.actions}>
+        {/* Right Actions */}
+        <View style={styles.actions}>
         {/* Tema Claro/Oscuro */}
         <TouchableOpacity 
           style={styles.iconButton}
           onPress={() => {
-            setIsDarkMode(!isDarkMode);
-            // TODO: Implementar cambio de tema
+            setShowThemeModal(true);
           }}
         >
-          <Text style={styles.icon}>{isDarkMode ? '🌙' : '☀️'}</Text>
+          <Ionicons
+            name={resolvedMode === 'dark' ? 'moon-outline' : 'sunny-outline'}
+            size={24}
+            color={theme.text}
+          />
         </TouchableOpacity>
 
         {/* Notificaciones */}
         <TouchableOpacity 
           style={styles.iconButton}
           onPress={() => {
-            // TODO: Abrir historial de notificaciones
+            router.push('/notifications');
           }}
         >
-          <Text style={styles.icon}>🔔</Text>
+          <Ionicons name="notifications-outline" size={24} color={theme.text} />
         </TouchableOpacity>
 
         {/* Perfil */}
         <TouchableOpacity 
           style={styles.profileButton}
-          onPress={() => setShowProfileMenu(true)}
+          onPress={() => {
+            setShowProfileMenu(true);
+            void refreshUser();
+          }}
         >
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
-              {user?.user_metadata?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+              {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
             </Text>
           </View>
         </TouchableOpacity>
       </View>
 
-      {/* Modal Menú de Perfil */}
+      {/* Modal Tema */}
       <Modal
-        visible={showProfileMenu}
+        visible={showThemeModal}
         animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowProfileMenu(false)}
+        transparent
+        onRequestClose={() => setShowThemeModal(false)}
       >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
+        <TouchableOpacity
+          style={styles.themeOverlay}
           activeOpacity={1}
-          onPress={() => setShowProfileMenu(false)}
+          onPress={() => setShowThemeModal(false)}
         >
-          <View style={styles.menuContainer}>
-            {/* Header del Menu */}
-            <View style={styles.menuHeader}>
-              <View style={styles.menuAvatar}>
-                <Text style={styles.menuAvatarText}>
-                  {user?.user_metadata?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
-                </Text>
+          <View style={[styles.themeSheet, { backgroundColor: theme.card, borderColor: theme.border }] }>
+            <View style={styles.themeHeaderRow}>
+              <View style={styles.themeTitleRow}>
+                <Ionicons name="color-palette-outline" size={20} color={theme.text} />
+                <Text style={[styles.themeTitle, { color: theme.text }]}>Tema</Text>
               </View>
-              <View style={styles.menuUserInfo}>
-                <Text style={styles.menuUserName}>
-                  {user?.user_metadata?.name || user?.email || 'Usuario'}
-                </Text>
-                <Text style={styles.menuUserEmail}>{user?.email}</Text>
-                <View style={styles.menuUserStats}>
-                  <Text style={styles.menuUserLevel}>Nivel 99</Text>
-                  <Text style={styles.menuUserXP}>99999 XP</Text>
-                </View>
-              </View>
+              <TouchableOpacity onPress={() => setShowThemeModal(false)}>
+                <Ionicons name="close" size={22} color={theme.textSecondary} />
+              </TouchableOpacity>
             </View>
+            <Text style={[styles.themeSubtitle, { color: theme.textSecondary }]}>
+              Elige cómo quieres ver la app
+            </Text>
 
-            {/* Opciones del Menu */}
-            <View style={styles.menuItems}>
-              {isAdmin && (
-                <TouchableOpacity 
-                  style={styles.menuItem}
-                  onPress={() => {
-                    setShowProfileMenu(false);
-                    router.push('/admin');
-                  }}
-                >
-                  <Text style={styles.menuItemIcon}>⚙️</Text>
-                  <Text style={styles.menuItemText}>Panel de Administración</Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity 
-                style={styles.menuItem}
-                onPress={() => {
-                  setShowProfileMenu(false);
-                  router.push('/achievements');
-                }}
+            <View style={styles.themeOptions}>
+              <TouchableOpacity
+                style={[
+                  styles.themeOption,
+                  { borderColor: theme.border, backgroundColor: mode === 'light' ? (resolvedMode === 'dark' ? '#111827' : '#EFF6FF') : 'transparent' },
+                ]}
+                activeOpacity={0.85}
+                onPress={() => setMode('light')}
               >
-                <Text style={styles.menuItemIcon}>🏆</Text>
-                <Text style={styles.menuItemText}>Tus logros</Text>
+                <View style={styles.themeOptionLeft}>
+                  <View style={[styles.themeIconPill, { backgroundColor: '#EFF6FF' }]}>
+                    <Ionicons name="sunny-outline" size={18} color={theme.primary} />
+                  </View>
+                  <View>
+                    <Text style={[styles.themeOptionTitle, { color: theme.text }]}>Claro</Text>
+                    <Text style={[styles.themeOptionDesc, { color: theme.textSecondary }]}>Fondo claro</Text>
+                  </View>
+                </View>
+                {mode === 'light' ? (
+                  <Ionicons name="checkmark-circle" size={20} color={theme.primary} />
+                ) : (
+                  <Ionicons name="ellipse-outline" size={20} color={theme.textSecondary} />
+                )}
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={styles.menuItem}
-                onPress={() => {
-                  setShowProfileMenu(false);
-                  router.push('/profile');
-                }}
+              <TouchableOpacity
+                style={[
+                  styles.themeOption,
+                  { borderColor: theme.border, backgroundColor: mode === 'dark' ? (resolvedMode === 'dark' ? '#1F2937' : '#F3F4F6') : 'transparent' },
+                ]}
+                activeOpacity={0.85}
+                onPress={() => setMode('dark')}
               >
-                <Text style={styles.menuItemIcon}>👤</Text>
-                <Text style={styles.menuItemText}>Mi Perfil</Text>
+                <View style={styles.themeOptionLeft}>
+                  <View style={[styles.themeIconPill, { backgroundColor: '#111827' }]}>
+                    <Ionicons name="moon-outline" size={18} color="#F9FAFB" />
+                  </View>
+                  <View>
+                    <Text style={[styles.themeOptionTitle, { color: theme.text }]}>Oscuro</Text>
+                    <Text style={[styles.themeOptionDesc, { color: theme.textSecondary }]}>Fondo oscuro</Text>
+                  </View>
+                </View>
+                {mode === 'dark' ? (
+                  <Ionicons name="checkmark-circle" size={20} color={theme.primary} />
+                ) : (
+                  <Ionicons name="ellipse-outline" size={20} color={theme.textSecondary} />
+                )}
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={styles.menuItem}
-                onPress={() => {
-                  setShowProfileMenu(false);
-                  // TODO: Abrir historial de notificaciones
-                }}
+              <TouchableOpacity
+                style={[
+                  styles.themeOption,
+                  { borderColor: theme.border, backgroundColor: mode === 'system' ? (resolvedMode === 'dark' ? '#1F2937' : '#F3F4F6') : 'transparent' },
+                ]}
+                activeOpacity={0.85}
+                onPress={() => setMode('system')}
               >
-                <Text style={styles.menuItemIcon}>🔔</Text>
-                <Text style={styles.menuItemText}>Historial de notificaciones</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.menuItem, styles.menuItemDanger]}
-                onPress={handleLogout}
-              >
-                <Text style={styles.menuItemIcon}>🚪</Text>
-                <Text style={[styles.menuItemText, styles.menuItemTextDanger]}>
-                  Cerrar sesión
-                </Text>
+                <View style={styles.themeOptionLeft}>
+                  <View style={[styles.themeIconPill, { backgroundColor: '#F3F4F6' }]}>
+                    <Ionicons name="phone-portrait-outline" size={18} color={theme.text} />
+                  </View>
+                  <View>
+                    <Text style={[styles.themeOptionTitle, { color: theme.text }]}>Automático</Text>
+                    <Text style={[styles.themeOptionDesc, { color: theme.textSecondary }]}>Sigue el sistema</Text>
+                  </View>
+                </View>
+                {mode === 'system' ? (
+                  <Ionicons name="checkmark-circle" size={20} color={theme.primary} />
+                ) : (
+                  <Ionicons name="ellipse-outline" size={20} color={theme.textSecondary} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
       </Modal>
-    </View>
+
+        {/* Modal Menú de Perfil */}
+        <Modal
+          visible={showProfileMenu}
+          animationType="fade"
+          transparent={true}
+          onRequestClose={() => setShowProfileMenu(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowProfileMenu(false)}
+          >
+            <View style={[styles.menuContainer, { backgroundColor: theme.card }] }>
+              {/* Header del Menu */}
+              <View style={[styles.menuHeader, { borderBottomColor: theme.border }] }>
+                <View style={styles.menuAvatar}>
+                  <Text style={styles.menuAvatarText}>
+                    {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
+                  </Text>
+                </View>
+                <View style={styles.menuUserInfo}>
+                  <Text style={[styles.menuUserName, { color: theme.text }]}>
+                    {displayName}
+                  </Text>
+                  <Text style={[styles.menuUserEmail, { color: theme.textSecondary }]}>{displayEmail}</Text>
+                  <View style={styles.menuUserStats}>
+                    <Text style={[styles.menuUserLevel, { color: theme.primary }]}>Nivel {level}</Text>
+                    <Text style={[styles.menuUserXP, { color: '#10B981' }]}>{xp.toLocaleString()} XP</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Opciones del Menu */}
+              <View style={styles.menuItems}>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setShowProfileMenu(false);
+                    router.push('/profile');
+                  }}
+                >
+                  <Ionicons name="person-outline" size={24} color={theme.text} />
+                  <Text style={[styles.menuItemText, { color: theme.text }]}>Mi perfil</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setShowProfileMenu(false);
+                    router.push('/achievements');
+                  }}
+                >
+                  <Ionicons name="trophy-outline" size={24} color={theme.text} />
+                  <Text style={[styles.menuItemText, { color: theme.text }]}>Tus logros</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setShowProfileMenu(false);
+                    router.push('/settings');
+                  }}
+                >
+                  <Ionicons name="settings-outline" size={24} color={theme.text} />
+                  <Text style={[styles.menuItemText, { color: theme.text }]}>Configuraciones</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setShowProfileMenu(false);
+                    router.push('/notifications');
+                  }}
+                >
+                  <Ionicons name="notifications-outline" size={24} color={theme.text} />
+                  <Text style={[styles.menuItemText, { color: theme.text }]}>Historial de notificaciones</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.menuItem, styles.menuItemDanger]}
+                  onPress={handleLogout}
+                >
+                  <Ionicons name="log-out-outline" size={24} color="#EF4444" />
+                  <Text style={[styles.menuItemText, styles.menuItemTextDanger]}>
+                    Cerrar sesión
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    backgroundColor: '#FFFFFF',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -173,19 +305,76 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
   },
+  themeOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  themeSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+  },
+  themeHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  themeTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  themeTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  themeSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+  },
+  themeOptions: {
+    marginTop: 14,
+    gap: 10,
+  },
+  themeOption: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  themeOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  themeIconPill: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  themeOptionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  themeOptionDesc: {
+    fontSize: 12,
+    marginTop: 2,
+  },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  logo: {
-    fontSize: 24,
-  },
-  logoText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2563EB',
-    letterSpacing: 1,
+  logoImage: {
+    width: 120,
+    height: 32,
   },
   actions: {
     flexDirection: 'row',

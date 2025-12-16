@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert, Modal, TextInput, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert, Modal, TextInput, TouchableOpacity, ActivityIndicator, Linking, Platform } from 'react-native';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
@@ -9,6 +10,12 @@ import { TabBar } from '../components/ui/TabBar';
 import { Card } from '../components/ui/Card';
 import { userService } from '../services/users.service';
 import { Header } from '../components/Header';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
+import { format } from 'date-fns';
+import { achievementService, Achievement } from '../services/achievements.service';
+import { useTheme } from '../contexts/ThemeContext';
+import { pushNotificationsService } from '../services/pushNotifications.service';
 
 // Helper function to map emojis or icon names to valid Ionicons names
 const getIconName = (icon: string | null | undefined): keyof typeof Ionicons.glyphMap => {
@@ -57,24 +64,69 @@ const getIconName = (icon: string | null | undefined): keyof typeof Ionicons.gly
 export default function DashboardScreen() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
+  const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState('Todos');
   const [showModal, setShowModal] = useState(false);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [isFirstLogin, setIsFirstLogin] = useState(false);
 
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [loadingAchievements, setLoadingAchievements] = useState(false);
+
   // Form states
   const [paymentName, setPaymentName] = useState('');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('COP');
-  const [dueDate, setDueDate] = useState('');
+  const [dueDateDate, setDueDateDate] = useState<Date | null>(null);
+  const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [category, setCategory] = useState('');
-  const [icon, setIcon] = useState('');
   const [editingPayment, setEditingPayment] = useState<any>(null);
   const [paymentUrl, setPaymentUrl] = useState('');
   const [deepLink, setDeepLink] = useState('');
-  const [showCustomAppModal, setShowCustomAppModal] = useState(false);
-  const [customAppPackage, setCustomAppPackage] = useState('');
+
+  const [promptVisible, setPromptVisible] = useState(false);
+  const [promptTitle, setPromptTitle] = useState('');
+  const [promptMessage, setPromptMessage] = useState('');
+  const [promptValue, setPromptValue] = useState('');
+  const [promptOnSave, setPromptOnSave] = useState<((value: string) => void) | null>(null);
+
+  const toLocalNoonIso = (d: Date) => {
+    const localNoon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+    return localNoon.toISOString();
+  };
+
+  const promptText = (
+    title: string,
+    message: string,
+    initialValue: string,
+    onSave: (value: string) => void
+  ) => {
+    if (Platform.OS === 'ios' && typeof (Alert as any).prompt === 'function') {
+      (Alert as any).prompt(
+        title,
+        message,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Guardar',
+            onPress: (value?: string) => {
+              if (value) onSave(value);
+            },
+          },
+        ],
+        'plain-text',
+        initialValue
+      );
+      return;
+    }
+
+    setPromptTitle(title);
+    setPromptMessage(message);
+    setPromptValue(initialValue);
+    setPromptOnSave(() => onSave);
+    setPromptVisible(true);
+  };
 
   const loadPayments = async () => {
     try {
@@ -94,10 +146,56 @@ export default function DashboardScreen() {
     }
   };
 
+  const loadAchievements = async () => {
+    try {
+      if (!user?.id) return;
+      setLoadingAchievements(true);
+
+      const list = await achievementService.findByUserId(user.id);
+      if (list.length === 0) {
+        await achievementService.initializeDefaultAchievements(user.id);
+      }
+
+      const refreshed = await achievementService.findByUserId(user.id);
+      setAchievements(refreshed);
+    } catch (e) {
+      console.error('Error loading achievements:', e);
+    } finally {
+      setLoadingAchievements(false);
+    }
+  };
+
   useEffect(() => {
     if (user?.id) {
       loadPayments();
     }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (user?.id) {
+      void loadAchievements();
+
+      const channel = supabase
+        .channel(`achievements-dashboard-${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'achievements',
+            filter: `user_id=eq.${user.id}`,
+          },
+          () => {
+            void loadAchievements();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
+    }
+    return;
   }, [user?.id]);
 
   // Verificar si es primer login y no tiene pagos
@@ -109,8 +207,13 @@ export default function DashboardScreen() {
   }, [user?.first_login, payments.length, loading]);
 
   const handleSavePayment = async () => {
+    if (!user?.id) {
+      Alert.alert('Error', 'No se pudo identificar al usuario');
+      return;
+    }
+
     // Validaciones
-    if (!paymentName || !amount || !dueDate || !category) {
+    if (!paymentName || !amount || !dueDateDate || !category) {
       Alert.alert('Error', 'Por favor completa todos los campos obligatorios');
       return;
     }
@@ -118,55 +221,70 @@ export default function DashboardScreen() {
     try {
       setLoading(true);
 
-      // Parsear fecha
-      const [day, month, year] = dueDate.split('/');
-      const parsedDate = new Date(`${year}-${month}-${day}`);
-      
-      if (isNaN(parsedDate.getTime())) {
-        Alert.alert('Error', 'Fecha inválida. Usa formato dd/mm/aaaa');
-        return;
+      const parsedDateIso = toLocalNoonIso(dueDateDate);
+
+      const preferences = await pushNotificationsService.getOrCreateSettings(user.id);
+      if (preferences.enabled) {
+        await pushNotificationsService.requestPermissions();
       }
 
       if (editingPayment) {
         // Actualizar pago existente
-        const { error } = await supabase
+        const { data: updatedPayment, error } = await supabase
           .from('payments')
           .update({
             name: paymentName,
             amount: parseFloat(amount),
             currency: currency,
             category: category,
-            due_date: parsedDate.toISOString(),
-            selected_date: parsedDate.toISOString(),
-            icon: icon || 'card',
-            payment_url: paymentUrl || null,
-            deep_link: deepLink || null,
+            due_date: parsedDateIso,
+            selected_date: parsedDateIso,
+            icon: 'card',
+            payment_url: deepLink ? null : paymentUrl,
+            deep_link: paymentUrl ? '' : deepLink,
           })
-          .eq('id', editingPayment.id);
+          .eq('id', editingPayment.id)
+          .select()
+          .single();
 
         if (error) throw error;
+
+        if (preferences.enabled) {
+          await pushNotificationsService.schedulePaymentNotifications(
+            updatedPayment ?? editingPayment,
+            preferences
+          );
+        } else {
+          await pushNotificationsService.cancelPaymentNotifications(editingPayment.id);
+        }
         Alert.alert('Éxito', 'Pago actualizado correctamente');
       } else {
         // Crear nuevo pago
-        const { error } = await supabase
+        const { data: insertedPayment, error } = await supabase
           .from('payments')
           .insert({
-            user_id: user?.id,
+            user_id: user.id,
             name: paymentName,
             amount: parseFloat(amount),
             currency: currency,
             category: category,
-            due_date: parsedDate.toISOString(),
-            selected_date: parsedDate.toISOString(),
+            due_date: parsedDateIso,
+            selected_date: parsedDateIso,
             status: 'PENDING',
-            icon: icon || 'card',
+            icon: 'card',
             description: '',
             auto_debit: false,
-            payment_url: paymentUrl || null,
-            deep_link: deepLink || null,
-          });
+            payment_url: deepLink ? null : paymentUrl,
+            deep_link: paymentUrl ? '' : deepLink,
+          })
+          .select()
+          .single();
 
         if (error) throw error;
+
+        if (insertedPayment && preferences.enabled) {
+          await pushNotificationsService.schedulePaymentNotifications(insertedPayment, preferences);
+        }
         
         // Si es el primer pago y es primer login, actualizar first_login y redirigir
         if (isFirstLogin && !editingPayment) {
@@ -180,9 +298,8 @@ export default function DashboardScreen() {
           setIsFirstLogin(false);
           setPaymentName('');
           setAmount('');
-          setDueDate('');
+          setDueDateDate(null);
           setCategory('');
-          setIcon('');
           setPaymentUrl('');
           setDeepLink('');
           
@@ -194,7 +311,7 @@ export default function DashboardScreen() {
                 text: 'Configurar Notificaciones',
                 onPress: () => {
                   // Navegar a notificaciones
-                  router.push('/notifications');
+                  router.push('/notification-settings');
                 },
               },
             ]
@@ -212,15 +329,24 @@ export default function DashboardScreen() {
       }
       setPaymentName('');
       setAmount('');
-      setDueDate('');
+      setDueDateDate(null);
       setCategory('');
-      setIcon('');
       setPaymentUrl('');
       setDeepLink('');
       setEditingPayment(null);
       
       // Recargar pagos y reprogramar notificaciones
       await loadPayments();
+
+      try {
+        const refreshedPreferences = await pushNotificationsService.getOrCreateSettings(user.id);
+        if (refreshedPreferences.enabled) {
+          await pushNotificationsService.requestPermissions();
+        }
+        await pushNotificationsService.rescheduleAllUserPayments(user.id, refreshedPreferences);
+      } catch (e) {
+        console.error('Error rescheduling notifications after saving payment:', e);
+      }
     } catch (error) {
       console.error('Error saving payment:', error);
       Alert.alert('Error', 'No se pudo guardar el pago');
@@ -235,11 +361,11 @@ export default function DashboardScreen() {
     setAmount(payment.amount.toString());
     setCurrency(payment.currency);
     setCategory(payment.category);
-    setIcon(payment.icon || '');
     setPaymentUrl(payment.payment_url || '');
     setDeepLink(payment.deep_link || '');
     const date = new Date(payment.due_date);
-    setDueDate(`${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`);
+    const localDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
+    setDueDateDate(localDay);
     setShowModal(true);
   };
 
@@ -261,6 +387,8 @@ export default function DashboardScreen() {
 
               if (error) throw error;
 
+              await pushNotificationsService.cancelPaymentNotifications(payment.id);
+
               Alert.alert('Éxito', 'Pago eliminado');
               loadPayments();
             } catch (error) {
@@ -274,45 +402,60 @@ export default function DashboardScreen() {
 
   const handlePayment = async (payment: any) => {
     try {
-      // Si tiene deep_link (app), abrir app
+      // Si tiene app configurada (packageName)
       if (payment.deep_link) {
-        const canOpen = await Linking.canOpenURL(payment.deep_link);
-        if (canOpen) {
-          await Linking.openURL(payment.deep_link);
-        } else {
-          Alert.alert(
-            'App no disponible',
-            'La aplicación configurada no está instalada. ¿Deseas usar el link web?',
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              {
-                text: 'Abrir Web',
-                onPress: () => {
-                  if (payment.payment_url) {
-                    Linking.openURL(payment.payment_url);
-                  }
-                }
-              }
-            ]
-          );
+        const packageName = payment.deep_link;
+
+        if (Platform.OS === 'android') {
+          try {
+            await IntentLauncher.openApplication(packageName);
+            return;
+          } catch {
+            Alert.alert(
+              'App no instalada',
+              'La aplicación no está instalada en tu teléfono. ¿Deseas usar el link web?',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Abrir Web',
+                  onPress: () => {
+                    if (payment.payment_url) {
+                      void Linking.openURL(payment.payment_url);
+                    } else {
+                      Alert.alert('Error', 'No hay link web configurado');
+                    }
+                  },
+                },
+              ]
+            );
+            return;
+          }
         }
-      } 
-      // Si tiene payment_url (link), abrir navegador
-      else if (payment.payment_url) {
+
+        // iOS: intentamos abrir como URL (si el usuario configuró un scheme).
+        try {
+          await Linking.openURL(packageName);
+          return;
+        } catch {
+          // fallthrough
+        }
+      }
+
+      // Si tiene URL web
+      if (payment.payment_url) {
         const canOpen = await Linking.canOpenURL(payment.payment_url);
         if (canOpen) {
           await Linking.openURL(payment.payment_url);
         } else {
           Alert.alert('Error', 'No se puede abrir el link');
         }
+        return;
       }
-      // Si no tiene nada configurado
-      else {
-        Alert.alert(
-          'Sin configurar',
-          'Este pago no tiene un método de pago configurado. Edítalo para agregar un link o app.'
-        );
-      }
+
+      Alert.alert(
+        'Sin configurar',
+        'Edita este pago para configurar un método de pago (app o link web)'
+      );
     } catch (error) {
       Alert.alert('Error', 'No se pudo abrir el método de pago');
       console.error('Error opening payment:', error);
@@ -334,14 +477,64 @@ export default function DashboardScreen() {
     { label: 'Total Mensual', value: `$${payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0).toFixed(2)}`, icon: 'cash', color: 'green' as const },
   ];
 
+  const totalAchievements = achievements.length;
+  const unlockedAchievements = achievements.filter(a => a.unlocked).length;
+  const previewAchievements = achievements.slice(0, 4);
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }] }>
       <Header />
+
+      <Modal
+        visible={promptVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPromptVisible(false)}
+      >
+        <View style={styles.promptOverlay}>
+          <View style={styles.promptContainer}>
+            <Text style={styles.promptTitle}>{promptTitle}</Text>
+            <Text style={styles.promptMessage}>{promptMessage}</Text>
+            <TextInput
+              style={styles.promptInput}
+              value={promptValue}
+              onChangeText={setPromptValue}
+              placeholderTextColor="#9CA3AF"
+              autoCapitalize="none"
+            />
+            <View style={styles.promptButtons}>
+              <TouchableOpacity
+                style={styles.promptCancelButton}
+                onPress={() => {
+                  setPromptVisible(false);
+                  setPromptOnSave(null);
+                }}
+              >
+                <Text style={styles.promptCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.promptSaveButton}
+                onPress={() => {
+                  const value = (promptValue || '').trim();
+                  if (value && promptOnSave) {
+                    promptOnSave(value);
+                  }
+                  setPromptVisible(false);
+                  setPromptOnSave(null);
+                }}
+              >
+                <Text style={styles.promptSaveText}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>FLUXPAY</Text>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.title, { color: theme.text }]}>FLUXPAY</Text>
+          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
             Bienvenido, {user?.name || 'Administrador'}
           </Text>
         </View>
@@ -432,7 +625,7 @@ export default function DashboardScreen() {
                     style={styles.payButton}
                     onPress={() => handlePayment(payment)}
                   >
-                    <Text style={styles.payButtonText}>💳 Pagar</Text>
+                    <Text style={styles.payButtonText}> Pagar</Text>
                   </TouchableOpacity>
                 </Card>
               ))}
@@ -457,17 +650,42 @@ export default function DashboardScreen() {
         {/* Tus Logros */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>🏆 Tus Logros</Text>
-            <Text style={styles.achievementCount}>0/26</Text>
+            <Text style={styles.sectionTitle}> Tus Logros</Text>
+            <Text style={styles.achievementCount}>
+              {unlockedAchievements}/{totalAchievements}
+            </Text>
           </View>
           <View style={styles.achievementGrid}>
-            {[1, 2, 3, 4].map((i) => (
-              <Card key={i} style={styles.achievementCard}>
-                <Text style={styles.achievementIcon}>🔒</Text>
-                <Text style={styles.achievementLabel}>Bloqueado</Text>
+            {loadingAchievements ? (
+              <Card style={styles.achievementCard}>
+                <ActivityIndicator color="#2563EB" />
               </Card>
-            ))}
+            ) : previewAchievements.length === 0 ? (
+              <Card style={styles.achievementCard}>
+                <Ionicons name="trophy-outline" size={24} color="#9CA3AF" />
+                <Text style={styles.achievementLabel}>Sin logros</Text>
+              </Card>
+            ) : (
+              previewAchievements.map((a) => (
+                <Card key={a.id} style={styles.achievementCard}>
+                  <Ionicons
+                    name={a.unlocked ? 'trophy-outline' : 'lock-closed-outline'}
+                    size={24}
+                    color={a.unlocked ? '#10B981' : '#9CA3AF'}
+                  />
+                  <Text style={styles.achievementLabel} numberOfLines={2}>
+                    {a.title}
+                  </Text>
+                </Card>
+              ))
+            )}
           </View>
+          <TouchableOpacity
+            style={[styles.payButton, { backgroundColor: '#2563EB' }]}
+            onPress={() => router.push('/achievements')}
+          >
+            <Text style={styles.payButtonText}>Ver todos</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -495,9 +713,8 @@ export default function DashboardScreen() {
                   setEditingPayment(null);
                   setPaymentName('');
                   setAmount('');
-                  setDueDate('');
+                  setDueDateDate(null);
                   setCategory('');
-                  setIcon('');
                   setPaymentUrl('');
                   setDeepLink('');
                 }}>
@@ -557,13 +774,30 @@ export default function DashboardScreen() {
               <Text style={styles.inputLabel}>
                 Fecha de vencimiento <Text style={styles.required}>*</Text>
               </Text>
-              <TextInput
+              <TouchableOpacity
                 style={styles.input}
-                placeholder="dd/mm/aaaa"
-                value={dueDate}
-                onChangeText={setDueDate}
-                placeholderTextColor="#9CA3AF"
-              />
+                onPress={() => setShowDueDatePicker(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.dateInputText}>
+                  {dueDateDate ? format(dueDateDate, 'dd/MM/yyyy') : 'Selecciona una fecha'}
+                </Text>
+              </TouchableOpacity>
+
+              {showDueDatePicker && (
+                <DateTimePicker
+                  value={dueDateDate ?? new Date()}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(_event: unknown, selected?: Date) => {
+                    if (Platform.OS !== 'ios') setShowDueDatePicker(false);
+                    if (selected) {
+                      const localDay = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate(), 12, 0, 0, 0);
+                      setDueDateDate(localDay);
+                    }
+                  }}
+                />
+              )}
               <Text style={styles.inputHint}>
                 ℹ️ La fecha se ajustará automáticamente al último día del mes
               </Text>
@@ -572,110 +806,122 @@ export default function DashboardScreen() {
               <Text style={styles.inputLabel}>
                 Categoría <Text style={styles.required}>*</Text>
               </Text>
-              <View style={styles.categoryGrid}>
-                {['SERVICIOS', 'ENTRETENIMIENTO', 'TRANSPORTE', 'SALUD', 'ALIMENTACION', 'OTROS'].map((cat) => (
-                  <TouchableOpacity
-                    key={cat}
-                    style={[
-                      styles.categoryButton,
-                      category === cat && styles.categoryButtonActive
-                    ]}
-                    onPress={() => setCategory(cat)}
-                  >
-                    <Text style={[
-                      styles.categoryButtonText,
-                      category === cat && styles.categoryButtonTextActive
-                    ]}>
-                      {cat}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={category}
+                  onValueChange={(v: string) => setCategory(v)}
+                >
+                  <Picker.Item label="Selecciona una categoría" value="" />
+                  <Picker.Item label="Servicios" value="SERVICIOS" />
+                  <Picker.Item label="Entretenimiento" value="ENTRETENIMIENTO" />
+                  <Picker.Item label="Transporte" value="TRANSPORTE" />
+                  <Picker.Item label="Salud" value="SALUD" />
+                  <Picker.Item label="Alimentación" value="ALIMENTACION" />
+                  <Picker.Item label="Otros" value="OTROS" />
+                </Picker>
               </View>
-
-              {/* Icono */}
-              <Text style={styles.inputLabel}>Icono (opcional)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Nombre del icono (ej: phone, bulb, musical-notes)"
-                placeholderTextColor="#9CA3AF"
-                value={icon}
-                onChangeText={setIcon}
-              />
 
               {/* Configurar Enlace de Pago */}
-              <Text style={styles.sectionHeader}>🔗 Configurar enlace de pago</Text>
-              <Text style={styles.sectionSubtitle}>
-                Elige cómo quieres pagar esta cuenta
-              </Text>
+              {/* Configurar Método de Pago */}
+              <Text style={styles.sectionHeaderText}>💳 Método de pago</Text>
 
               {/* Opción 1: Link Web */}
-              <Text style={styles.inputLabel}>Link de pago (URL)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="https://ejemplo.com/pagar"
-                value={paymentUrl}
-                onChangeText={setPaymentUrl}
-                placeholderTextColor="#9CA3AF"
-                keyboardType="url"
-                autoCapitalize="none"
-              />
-              <Text style={styles.inputHint}>
-                💡 Ejemplo: Link del banco, PSE, o página de pago
-              </Text>
-
-              {/* Selector de App */}
-              <Text style={styles.inputLabel}>Abrir app para pagar</Text>
-              <View style={styles.appSelectorContainer}>
-                <TouchableOpacity 
-                  style={styles.appSelectorButton}
-                  onPress={() => {
-                    Alert.alert(
-                      'Seleccionar App',
-                      'Elige la app que se abrirá al presionar "Pagar"',
-                      [
-                        {
-                          text: 'Bancolombia',
-                          onPress: () => setDeepLink('bancolombia://')
-                        },
-                        {
-                          text: 'Nequi',
-                          onPress: () => setDeepLink('nequi://')
-                        },
-                        {
-                          text: 'Daviplata',
-                          onPress: () => setDeepLink('daviplata://')
-                        },
-                        {
-                          text: 'PSE',
-                          onPress: () => setDeepLink('pse://')
-                        },
-                        {
-                          text: 'Personalizado',
-                          onPress: () => {
-                            setShowCustomAppModal(true);
-                          }
-                        },
-                        { text: 'Cancelar', style: 'cancel' }
-                      ]
-                    );
-                  }}
-                >
-                  <Text style={styles.appSelectorText}>
-                    {deepLink ? `📱 ${deepLink}` : '📱 Seleccionar app...'}
+              <TouchableOpacity 
+                style={styles.paymentMethodButton}
+                onPress={() => {
+                  promptText(
+                    'Link de Pago Web',
+                    'Ingresa la URL de la página de pago',
+                    paymentUrl,
+                    (url) => {
+                      setPaymentUrl(url);
+                      setDeepLink('');
+                    }
+                  );
+                }}
+              >
+                <Text style={styles.paymentMethodIcon}>🌐</Text>
+                <View style={styles.paymentMethodInfo}>
+                  <Text style={styles.paymentMethodTitle}>Link Web (URL)</Text>
+                  <Text style={styles.paymentMethodDesc}>
+                    {paymentUrl || 'No configurado'}
                   </Text>
-                </TouchableOpacity>
-                {deepLink && (
-                  <TouchableOpacity 
-                    style={styles.clearButton}
-                    onPress={() => setDeepLink('')}
-                  >
-                    <Text style={styles.clearButtonText}>✕</Text>
+                </View>
+                {paymentUrl && (
+                  <TouchableOpacity onPress={() => setPaymentUrl('')}>
+                    <Text style={styles.clearIcon}>✕</Text>
                   </TouchableOpacity>
                 )}
-              </View>
-              <Text style={styles.inputHint}>
-                💡 Selecciona la app que se abrirá al presionar "Pagar"
-              </Text>
+              </TouchableOpacity>
+
+              {/* Opción 2: Seleccionar App */}
+              <TouchableOpacity 
+                style={styles.paymentMethodButton}
+                onPress={() => {
+                  Alert.alert(
+                    'Seleccionar Aplicación',
+                    'Elige qué aplicación abrir al presionar "Pagar"',
+                    [
+                      {
+                        text: 'Bancolombia',
+                        onPress: () => {
+                          setDeepLink('com.todo1.mobile');
+                          setPaymentUrl('');
+                        }
+                      },
+                      {
+                        text: 'Nequi',
+                        onPress: () => {
+                          setDeepLink('com.nequi.MobileApp');
+                          setPaymentUrl('');
+                        }
+                      },
+                      {
+                        text: 'Daviplata',
+                        onPress: () => {
+                          setDeepLink('com.daviplata.mobile');
+                          setPaymentUrl('');
+                        }
+                      },
+                      {
+                        text: 'PSE',
+                        onPress: () => {
+                          setDeepLink('co.com.pse.mobile');
+                          setPaymentUrl('');
+                        }
+                      },
+                      {
+                        text: 'Otra app',
+                        onPress: () => {
+                          promptText(
+                            'Nombre del Paquete',
+                            'Ingresa el nombre del paquete de la app (ej: com.banco.app)',
+                            deepLink,
+                            (pkg) => {
+                              setDeepLink(pkg);
+                              setPaymentUrl('');
+                            }
+                          );
+                        }
+                      },
+                      { text: 'Cancelar', style: 'cancel' }
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.paymentMethodIcon}>📱</Text>
+                <View style={styles.paymentMethodInfo}>
+                  <Text style={styles.paymentMethodTitle}>Aplicación del Teléfono</Text>
+                  <Text style={styles.paymentMethodDesc}>
+                    {deepLink || 'No configurado'}
+                  </Text>
+                </View>
+                {deepLink && (
+                  <TouchableOpacity onPress={() => setDeepLink('')}>
+                    <Text style={styles.clearIcon}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
 
               {/* Botones */}
               <View style={styles.modalButtons}>
@@ -687,9 +933,8 @@ export default function DashboardScreen() {
                       setEditingPayment(null);
                       setPaymentName('');
                       setAmount('');
-                      setDueDate('');
+                      setDueDateDate(null);
                       setCategory('');
-                      setIcon('');
                       setPaymentUrl('');
                       setDeepLink('');
                     }}
@@ -716,69 +961,6 @@ export default function DashboardScreen() {
                 </TouchableOpacity>
               </View>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal App Personalizada */}
-      <Modal
-        visible={showCustomAppModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setShowCustomAppModal(false);
-          setCustomAppPackage('');
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContainer, { maxHeight: '50%', justifyContent: 'center' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>App Personalizada</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowCustomAppModal(false);
-                  setCustomAppPackage('');
-                }}
-              >
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalSubtitle}>
-                Ingresa el nombre del paquete (ej: com.ejemplo.app)
-              </Text>
-              <TextInput
-                style={styles.input}
-                placeholder="com.ejemplo.app"
-                value={customAppPackage}
-                onChangeText={setCustomAppPackage}
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="none"
-              />
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.modalCancelButton}
-                  onPress={() => {
-                    setShowCustomAppModal(false);
-                    setCustomAppPackage('');
-                  }}
-                >
-                  <Text style={styles.modalCancelText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.modalSaveButton}
-                  onPress={() => {
-                    if (customAppPackage) {
-                      setDeepLink(customAppPackage);
-                    }
-                    setShowCustomAppModal(false);
-                    setCustomAppPackage('');
-                  }}
-                >
-                  <Text style={styles.modalSaveText}>Guardar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
           </View>
         </View>
       </Modal>
@@ -953,6 +1135,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     backgroundColor: '#FFFFFF',
   },
+  dateInputText: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  pickerContainer: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
   placeholder: {
     color: '#9CA3AF',
   },
@@ -1066,6 +1260,38 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#2563EB',
   },
+  paymentMethodButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  paymentMethodIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  paymentMethodInfo: {
+    flex: 1,
+  },
+  paymentMethodTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  paymentMethodDesc: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  clearIcon: {
+    fontSize: 24,
+    color: '#EF4444',
+    paddingLeft: 12,
+  },
   paymentFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1137,7 +1363,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  sectionHeader: {
+  sectionHeaderText: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#111827',
@@ -1149,36 +1375,77 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 12,
   },
-  appSelectorContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  appSelectorButton: {
+  bankModalOverlay: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'flex-end',
   },
-  appSelectorText: {
-    fontSize: 15,
-    color: '#374151',
-    fontWeight: '500',
+  bankModalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 24,
   },
-  clearButton: {
-    backgroundColor: '#FEE2E2',
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearButtonText: {
+  bankModalTitle: {
     fontSize: 18,
-    color: '#991B1B',
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  bankModalSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  bankAppList: {
+    gap: 10,
+  },
+  bankAppItem: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  bankAppName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  bankEmptyState: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  bankEmptyTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  bankEmptySubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  bankModalCancel: {
+    marginTop: 14,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  bankModalCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
   },
   modalCancelButton: {
     flex: 1,
@@ -1204,5 +1471,65 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
+  promptOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  promptContainer: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+  },
+  promptTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  promptMessage: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  promptInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    padding: 12,
+    color: '#111827',
+    backgroundColor: '#F9FAFB',
+    marginBottom: 12,
+  },
+  promptButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  promptCancelButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+  },
+  promptCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  promptSaveButton: {
+    flex: 1,
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+  },
+  promptSaveText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
 });
-

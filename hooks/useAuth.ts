@@ -11,6 +11,35 @@ export function useAuth() {
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
+    if (!supabaseUser?.id) return;
+
+    const channel = supabase
+      .channel(`user-profile-${supabaseUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+          filter: `id=eq.${supabaseUser.id}`,
+        },
+        async () => {
+          try {
+            const refreshed = await userService.findById(supabaseUser.id);
+            if (refreshed) setUser(refreshed as any);
+          } catch (e) {
+            console.error('Error refreshing user via realtime:', e);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [supabaseUser?.id]);
+
+  useEffect(() => {
     // Obtener sesión actual
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -25,10 +54,14 @@ export function useAuth() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'PASSWORD_RECOVERY') {
+      // Verificar si es un flujo de recuperación de contraseña
+      const isPasswordRecoveryFlow = 
+        (event === 'SIGNED_IN' && session?.user?.app_metadata?.provider === 'email') ||
+        (event === 'PASSWORD_RECOVERY');
+
+      if (isPasswordRecoveryFlow) {
         // El usuario ha hecho click en el link de recuperación
         // La sesión temporal está establecida, pero no debemos sincronizar el usuario todavía
-        // El usuario será redirigido a reset-password para cambiar la contraseña
         if (session?.user) {
           setSupabaseUser(session.user);
           setIsPasswordRecovery(true);
@@ -37,10 +70,15 @@ export function useAuth() {
         return;
       }
 
-      // Si es otro evento y hay una sesión de recuperación, limpiarla
-      if (isPasswordRecovery && event !== 'PASSWORD_RECOVERY') {
-        setIsPasswordRecovery(false);
-      }
+      // Usar el valor actual de isPasswordRecovery a través de una función de actualización
+      // para evitar dependencias en el array de dependencias
+      setIsPasswordRecovery(current => {
+        // Resetear el estado de recuperación si no estamos en un flujo de recuperación
+        if (current && event !== 'SIGNED_IN') {
+          return false;
+        }
+        return current;
+      });
 
       if (session?.user) {
         setSupabaseUser(session.user);
@@ -55,7 +93,7 @@ export function useAuth() {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, []); // No dependencies needed as we're using functional updates
 
   const syncUser = async (supabaseUser: User) => {
     try {
@@ -160,7 +198,7 @@ export function useAuth() {
     refreshUser,
     updatePassword,
     isAuthenticated: !!user,
-    isAdmin: user?.role === 'ADMIN',
+    isAdmin: (user?.role || '').toString().toLowerCase() === 'admin',
   };
 }
 

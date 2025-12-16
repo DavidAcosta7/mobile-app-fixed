@@ -46,15 +46,15 @@ export function StatCard({ label, value, icon, color }: StatCardProps) {
 const styles = StyleSheet.create({
   container: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-    flex: 1,
     minWidth: '48%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+    flex: 1,
     marginBottom: 8,
   },
   header: {
@@ -64,7 +64,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   label: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#6B7280',
   },
   value: {

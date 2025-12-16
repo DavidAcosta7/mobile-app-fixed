@@ -32,7 +32,11 @@ export default function LoginScreen() {
     try {
       await signIn(email.trim(), password);
       Alert.alert('Bienvenido', 'Has iniciado sesión correctamente');
-      router.replace('/(tabs)/dashboard');
+      // Navigate to dashboard after successful login
+      router.replace({
+        pathname: '/dashboard',
+        params: { shouldRefresh: 'true' }
+      });
     } catch (error: any) {
       const errorMessage = error.message || 'Error al iniciar sesión';
       if (errorMessage.includes('suspendida')) {

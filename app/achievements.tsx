@@ -1,51 +1,73 @@
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from '../components/ui/Card';
 import { Header } from '../components/Header';
+import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
+import { achievementService, Achievement } from '../services/achievements.service';
+import { supabase } from '../lib/supabase';
 
 export default function AchievementsScreen() {
-  const achievements = [
-    { 
-      id: 1, 
-      title: 'Primer pago', 
-      desc: 'Completa tu primer pago a tiempo', 
-      icon: 'target' as keyof typeof Ionicons.glyphMap, 
-      locked: true, 
-      xp: 50,
-      progress: 0,
-      total: 1
-    },
-    { 
-      id: 2, 
-      title: 'Racha 3 días', 
-      desc: 'Paga a tiempo 3 días consecutivos', 
-      icon: 'flame' as keyof typeof Ionicons.glyphMap, 
-      locked: true, 
-      xp: 100,
-      progress: 0,
-      total: 3
-    },
-    { 
-      id: 3, 
-      title: 'Racha 7 días', 
-      desc: 'Paga a tiempo 7 días consecutivos', 
-      icon: 'star' as keyof typeof Ionicons.glyphMap, 
-      locked: true, 
-      xp: 200,
-      progress: 0,
-      total: 7
-    },
-    { 
-      id: 4, 
-      title: 'Racha 30 días', 
-      desc: 'Paga a tiempo 30 días consecutivos', 
-      icon: 'diamond' as keyof typeof Ionicons.glyphMap, 
-      locked: true, 
-      xp: 500,
-      progress: 0,
-      total: 30
-    },
-  ];
+  const { user } = useAuth();
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const totals = useMemo(() => {
+    const total = achievements.length;
+    const unlocked = achievements.filter(a => a.unlocked).length;
+    return { total, unlocked };
+  }, [achievements]);
+
+  const loadAchievements = async () => {
+    try {
+      if (!user?.id) {
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+
+      const list = await achievementService.findByUserId(user.id);
+      if (list.length === 0) {
+        await achievementService.initializeDefaultAchievements(user.id);
+      }
+      const refreshed = await achievementService.findByUserId(user.id);
+      setAchievements(refreshed);
+    } catch (e) {
+      console.error('Error loading achievements:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadAchievements();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`achievements-screen-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'achievements',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          void loadAchievements();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   return (
     <View style={styles.container}>
@@ -61,61 +83,68 @@ export default function AchievementsScreen() {
             Desbloquea logros pagando a tiempo
           </Text>
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>0/26 Logros</Text>
+            <Text style={styles.badgeText}>
+              {totals.unlocked}/{totals.total} Logros
+            </Text>
           </View>
         </View>
 
         {/* Achievement Cards */}
         <View style={styles.achievementsContainer}>
-          {achievements.map((achievement) => (
-            <Card key={achievement.id} style={styles.achievementCard}>
-              <View style={styles.achievementHeader}>
-                <View style={[
-                  styles.iconContainer,
-                  achievement.locked ? styles.iconLocked : styles.iconUnlocked
-                ]}>
-                  <Ionicons 
-                    name={achievement.locked ? 'lock-closed' : achievement.icon} 
-                    size={28} 
-                    color={achievement.locked ? '#9CA3AF' : '#10B981'} 
-                  />
-                </View>
-                <View style={styles.achievementInfo}>
-                  <Text style={styles.achievementTitle}>{achievement.title}</Text>
-                  <Text style={[
-                    styles.achievementStatus,
-                    achievement.locked ? styles.statusLocked : styles.statusUnlocked
-                  ]}>
-                    {achievement.locked ? 'Bloqueado' : '¡Desbloqueado!'}
-                  </Text>
-                </View>
-                <Text style={[
-                  styles.achievementXP,
-                  achievement.locked ? styles.xpLocked : styles.xpUnlocked
-                ]}>
-                  +{achievement.xp} XP
-                </Text>
+          {loading ? (
+            <Card style={styles.achievementCard}>
+              <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                <ActivityIndicator color="#2563EB" />
               </View>
-              
-              <Text style={styles.achievementDesc}>{achievement.desc}</Text>
-              
-              {achievement.locked && (
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressBarBg}>
-                    <View 
-                      style={[
-                        styles.progressBarFill,
-                        { width: `${(achievement.progress / achievement.total) * 100}%` }
-                      ]} 
+            </Card>
+          ) : achievements.length === 0 ? (
+            <Card style={styles.achievementCard}>
+              <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                <Ionicons name="trophy-outline" size={28} color="#9CA3AF" />
+                <Text style={styles.achievementDesc}>Aún no hay logros</Text>
+              </View>
+            </Card>
+          ) : (
+            achievements.map((achievement) => (
+              <Card key={achievement.id} style={styles.achievementCard}>
+                <View style={styles.achievementHeader}>
+                  <View
+                    style={[
+                      styles.iconContainer,
+                      achievement.unlocked ? styles.iconUnlocked : styles.iconLocked,
+                    ]}
+                  >
+                    <Ionicons
+                      name={achievement.unlocked ? 'trophy-outline' : 'lock-closed'}
+                      size={28}
+                      color={achievement.unlocked ? '#10B981' : '#9CA3AF'}
                     />
                   </View>
-                  <Text style={styles.progressText}>
-                    {achievement.progress}/{achievement.total} completado
+                  <View style={styles.achievementInfo}>
+                    <Text style={styles.achievementTitle}>{achievement.title}</Text>
+                    <Text
+                      style={[
+                        styles.achievementStatus,
+                        achievement.unlocked ? styles.statusUnlocked : styles.statusLocked,
+                      ]}
+                    >
+                      {achievement.unlocked ? '¡Desbloqueado!' : 'Bloqueado'}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.achievementXP,
+                      achievement.unlocked ? styles.xpUnlocked : styles.xpLocked,
+                    ]}
+                  >
+                    +{achievement.points} XP
                   </Text>
                 </View>
-              )}
-            </Card>
-          ))}
+
+                <Text style={styles.achievementDesc}>{achievement.description}</Text>
+              </Card>
+            ))
+          )}
         </View>
       </ScrollView>
     </View>

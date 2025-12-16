@@ -50,16 +50,14 @@ export default function RegisterPage() {
 
     try {
       await signUp(email.trim(), password, nombre.trim(), telefono.trim());
-      Alert.alert(
-        'Cuenta creada',
-        'Tu cuenta ha sido creada exitosamente. Ya puedes iniciar sesión.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.replace('/(auth)/login'),
-          },
-        ]
-      );
+      // Navigate to login after successful registration
+      router.replace({
+        pathname: '/login',
+        params: { 
+          registrationSuccess: 'true',
+          message: 'Tu cuenta ha sido creada exitosamente. Por favor inicia sesión.'
+        }
+      });
     } catch (err: any) {
       const errorMessage = err.message || 'Error al crear cuenta';
       Alert.alert('Error', errorMessage);

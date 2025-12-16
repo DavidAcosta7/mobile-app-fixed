@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { Card } from '../components/ui/Card';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface User {
   id: string;
@@ -23,7 +24,9 @@ interface User {
   role: string;
   email_verified: boolean;
   created_at: string;
-  suspended: boolean;
+  status?: string;
+  suspended_at?: string | null;
+  suspended?: boolean;
   financial_level: number;
   experience_points: number;
 }
@@ -138,8 +141,13 @@ const getActionColor = (actionType: string) => {
 export default function AdminScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const { theme, resolvedMode } = useTheme();
   const [activeTab, setActiveTab] = useState('Usuarios');
   const [users, setUsers] = useState<User[]>([]);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [activeUsers, setActiveUsers] = useState(0);
+  const [suspendedUsers, setSuspendedUsers] = useState(0);
+  const [totalPayments, setTotalPayments] = useState(0);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [reports, setReports] = useState<Reports | null>(null);
   const [loading, setLoading] = useState(true);
@@ -156,7 +164,7 @@ export default function AdminScreen() {
   const [xpAmount, setXpAmount] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState('USER');
+  const [selectedRole, setSelectedRole] = useState('user');
   const [newLevel, setNewLevel] = useState('');
   const [myCurrentPassword, setMyCurrentPassword] = useState('');
   const [myNewPassword, setMyNewPassword] = useState('');
@@ -175,8 +183,87 @@ export default function AdminScreen() {
 
   // Cargar usuarios al montar el componente
   useEffect(() => {
-    loadUsers();
+    void loadStats();
+    void loadUsers();
   }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-users-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'users' },
+        () => {
+          void loadStats();
+          if (activeTab === 'Usuarios') {
+            void loadUsers();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [activeTab]);
+
+  const isUserSuspended = (u: User) => {
+    if (typeof u.status === 'string') return u.status.toLowerCase() === 'suspended';
+    if (u.suspended_at != null) return true;
+    return !!u.suspended;
+  };
+
+  const normalizeRole = (role: string | null | undefined) => {
+    const r = (role || 'user').toString().toLowerCase();
+    return r === 'admin' ? 'admin' : 'user';
+  };
+
+  const loadStats = async () => {
+    try {
+      // Total usuarios
+      const { count: total, error: totalErr } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true });
+      if (totalErr) throw totalErr;
+      setTotalUsers(total || 0);
+
+      // Total pagos
+      const { count: payments, error: paymentsErr } = await supabase
+        .from('payments')
+        .select('*', { count: 'exact', head: true });
+      if (paymentsErr) throw paymentsErr;
+      setTotalPayments(payments || 0);
+
+      // Intentar por schema nuevo (status)
+      const { count: activeByStatus, error: activeErr } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active');
+
+      const { count: suspendedByStatus, error: suspendedErr } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'suspended');
+
+      if (!activeErr && !suspendedErr) {
+        setActiveUsers(activeByStatus || 0);
+        setSuspendedUsers(suspendedByStatus || 0);
+        return;
+      }
+
+      // Fallback: schema viejo (suspended boolean)
+      const { count: suspendedByBool, error: suspendedBoolErr } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('suspended', true);
+      if (suspendedBoolErr) throw suspendedBoolErr;
+      const suspendedCount = suspendedByBool || 0;
+      setSuspendedUsers(suspendedCount);
+      setActiveUsers(Math.max((total || 0) - suspendedCount, 0));
+    } catch (e) {
+      console.error('Error loading admin stats:', e);
+    }
+  };
 
   const loadUsers = async () => {
     try {
@@ -329,10 +416,10 @@ export default function AdminScreen() {
   };
 
   const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'ADMIN':
+    switch ((role || '').toString().toLowerCase()) {
+      case 'admin':
         return '#DC2626';
-      case 'USER':
+      case 'user':
         return '#10B981';
       default:
         return '#6B7280';
@@ -340,10 +427,10 @@ export default function AdminScreen() {
   };
 
   const getRoleLabel = (role: string) => {
-    switch (role) {
-      case 'ADMIN':
+    switch ((role || '').toString().toLowerCase()) {
+      case 'admin':
         return 'Administrador';
-      case 'USER':
+      case 'user':
         return 'Usuario';
       default:
         return role;
@@ -396,7 +483,7 @@ export default function AdminScreen() {
 
   const handleAssignXP = (userItem: User) => {
     setSelectedUser(userItem);
-    setXpAmount(userItem.experience_points.toString());
+    setXpAmount('');
     setShowXPModal(true);
   };
 
@@ -406,9 +493,22 @@ export default function AdminScreen() {
       return;
     }
 
+    const delta = parseInt(xpAmount);
+    if (isNaN(delta) || delta < 0) {
+      Alert.alert('Error', 'Ingresa una cantidad válida de XP');
+      return;
+    }
+
     try {
-      const oldXP = selectedUser.experience_points;
-      const newXP = parseInt(xpAmount);
+      const { data: current, error: currentErr } = await supabase
+        .from('users')
+        .select('experience_points')
+        .eq('id', selectedUser.id)
+        .single();
+      if (currentErr) throw currentErr;
+
+      const oldXP = (current as any)?.experience_points ?? 0;
+      const newXP = oldXP + delta;
 
       const { error } = await supabase
         .from('users')
@@ -426,14 +526,15 @@ export default function AdminScreen() {
         'ASSIGN_XP',
         selectedUser.id,
         selectedUser.name,
-        { old_xp: oldXP, new_xp: newXP }
+        { old_xp: oldXP, delta_xp: delta, new_xp: newXP }
       );
 
-      Alert.alert('Éxito', `${xpAmount} XP asignados a ${selectedUser.name}`);
+      Alert.alert('Éxito', `Se sumaron ${delta} XP. Total: ${newXP} XP`);
       setShowXPModal(false);
       setXpAmount('');
       setSelectedUser(null);
-      loadUsers();
+      await loadStats();
+      await loadUsers();
     } catch (error) {
       Alert.alert('Error', 'No se pudo asignar XP');
       console.error(error);
@@ -448,48 +549,48 @@ export default function AdminScreen() {
   };
 
   const handleSavePassword = async () => {
-    if (!selectedUser || !newPassword || !confirmPassword || !user) {
-      Alert.alert('Error', 'Completa todos los campos');
+    if (!selectedUser || !user) {
+      Alert.alert('Error', 'No se pudo identificar el usuario');
       return;
     }
 
-    if (newPassword.length < 6) {
-      Alert.alert('Error', 'La contraseña debe tener al menos 6 caracteres');
-      return;
-    }
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(selectedUser.email);
+      if (error) throw error;
 
-    if (newPassword !== confirmPassword) {
-      Alert.alert('Error', 'Las contraseñas no coinciden');
-      return;
-    }
+      await logAuditAction(
+        user.id,
+        user.name,
+        'CHANGE_PASSWORD',
+        selectedUser.id,
+        selectedUser.name,
+        { method: 'reset_email' }
+      );
 
-    Alert.alert(
-      'Funcionalidad Requerida',
-      'El cambio de contraseña de otros usuarios requiere configuración del backend de Supabase. Por favor, configura una Edge Function o usa el panel de administración de Supabase para esta funcionalidad.',
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            setShowPasswordModal(false);
-            setNewPassword('');
-            setConfirmPassword('');
-            setSelectedUser(null);
-          }
-        }
-      ]
-    );
+      Alert.alert('Email enviado', 'Se envió un link para cambiar la contraseña');
+      setShowPasswordModal(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      setSelectedUser(null);
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo enviar el email de restablecimiento');
+      console.error(error);
+    }
   };
 
   const handleChangeRole = (userItem: User) => {
     setSelectedUser(userItem);
-    setSelectedRole(userItem.role);
+    setSelectedRole(normalizeRole(userItem.role));
     setShowRoleModal(true);
   };
 
   const handleSaveRole = async () => {
     if (!selectedUser || !user) return;
 
-    if (selectedRole === selectedUser.role) {
+    const currentRole = normalizeRole(selectedUser.role);
+    const nextRole = normalizeRole(selectedRole);
+
+    if (nextRole === currentRole) {
       setShowRoleModal(false);
       setSelectedUser(null);
       return;
@@ -500,7 +601,7 @@ export default function AdminScreen() {
 
       const { error } = await supabase
         .from('users')
-        .update({ role: selectedRole })
+        .update({ role: nextRole })
         .eq('id', selectedUser.id);
 
       if (error) throw error;
@@ -512,13 +613,14 @@ export default function AdminScreen() {
         'CHANGE_ROLE',
         selectedUser.id,
         selectedUser.name,
-        { old_role: oldRole, new_role: selectedRole }
+        { old_role: oldRole, new_role: nextRole }
       );
 
       Alert.alert('Éxito', `Rol actualizado para ${selectedUser.name}`);
       setShowRoleModal(false);
       setSelectedUser(null);
-      loadUsers();
+      await loadStats();
+      await loadUsers();
     } catch (error) {
       Alert.alert('Error', 'No se pudo actualizar el rol');
       console.error(error);
@@ -567,7 +669,8 @@ export default function AdminScreen() {
       setShowLevelModal(false);
       setNewLevel('');
       setSelectedUser(null);
-      loadUsers();
+      await loadStats();
+      await loadUsers();
     } catch (error) {
       Alert.alert('Error', 'No se pudo actualizar el nivel');
       console.error(error);
@@ -589,7 +692,11 @@ export default function AdminScreen() {
             try {
               const { error } = await supabase
                 .from('users')
-                .update({ suspended: true })
+                .update({
+                  status: 'suspended',
+                  suspended_at: new Date().toISOString(),
+                  suspended: true,
+                })
                 .eq('id', userItem.id);
 
               if (error) throw error;
@@ -604,7 +711,8 @@ export default function AdminScreen() {
               );
 
               Alert.alert('Éxito', `Usuario ${userItem.name} suspendido`);
-              loadUsers();
+              await loadStats();
+              await loadUsers();
             } catch (error) {
               Alert.alert('Error', 'No se pudo suspender el usuario');
               console.error(error);
@@ -629,7 +737,11 @@ export default function AdminScreen() {
             try {
               const { error } = await supabase
                 .from('users')
-                .update({ suspended: false })
+                .update({
+                  status: 'active',
+                  suspended_at: null,
+                  suspended: false,
+                })
                 .eq('id', userItem.id);
 
               if (error) throw error;
@@ -644,7 +756,8 @@ export default function AdminScreen() {
               );
 
               Alert.alert('Éxito', `Usuario ${userItem.name} habilitado`);
-              loadUsers();
+              await loadStats();
+              await loadUsers();
             } catch (error) {
               Alert.alert('Error', 'No se pudo habilitar el usuario');
               console.error(error);
@@ -759,14 +872,14 @@ export default function AdminScreen() {
 
   if (loading && activeTab === 'Usuarios' && users.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2563EB" />
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
@@ -774,45 +887,45 @@ export default function AdminScreen() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-            <Ionicons name="arrow-back" size={24} color="#2563EB" />
+            <Ionicons name="arrow-back" size={24} color={theme.primary} />
         </TouchableOpacity>
           <View style={styles.headerContent}>
-            <Text style={styles.title}>Panel de Administración</Text>
-            <Text style={styles.subtitle}>Gestiona la plataforma y modera contenido</Text>
+            <Text style={[styles.title, { color: theme.text }]}>Panel de Administración</Text>
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Gestiona la plataforma y modera contenido</Text>
           </View>
         </View>
 
         {/* Stats Cards */}
         <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: '#DBEAFE' }]}>
-              <Ionicons name="people-outline" size={24} color="#2563EB" />
+          <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#DBEAFE' }]}>
+              <Ionicons name="people-outline" size={24} color={theme.primary} />
           </View>
-            <Text style={styles.statValue}>{reports?.totalUsers || users.length || 0}</Text>
-            <Text style={styles.statLabel}>Total usuarios</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{totalUsers}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Total usuarios</Text>
           </View>
-          <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: '#D1FAE5' }]}>
+          <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#D1FAE5' }]}>
               <Ionicons name="checkmark-circle-outline" size={24} color="#10B981" />
             </View>
-            <Text style={styles.statValue}>{reports?.activeUsers || users.filter(u => !u.suspended).length || 0}</Text>
-            <Text style={styles.statLabel}>Usuarios activos</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{activeUsers}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Usuarios activos</Text>
           </View>
-          <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: '#FEE2E2' }]}>
+          <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#FEE2E2' }]}>
               <Ionicons name="ban-outline" size={24} color="#EF4444" />
             </View>
-            <Text style={styles.statValue}>{reports?.suspendedUsers || users.filter(u => u.suspended).length || 0}</Text>
-            <Text style={styles.statLabel}>Usuarios suspendidos</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{suspendedUsers}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Usuarios suspendidos</Text>
           </View>
-          <View style={styles.statCard}>
-            <View style={[styles.statIconContainer, { backgroundColor: '#FEF3C7' }]}>
+          <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#FEF3C7' }]}>
               <Ionicons name="card-outline" size={24} color="#F59E0B" />
             </View>
-            <Text style={styles.statValue}>
-              {reports?.totalPayments || 0}
+            <Text style={[styles.statValue, { color: theme.text }]}>
+              {totalPayments}
             </Text>
-            <Text style={styles.statLabel}>Total pagos</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Total pagos</Text>
           </View>
         </View>
 
@@ -820,34 +933,34 @@ export default function AdminScreen() {
         <View style={styles.tabsContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <TouchableOpacity 
-              style={[styles.tab, activeTab === 'Usuarios' && styles.activeTab]}
+              style={[styles.tab, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }, activeTab === 'Usuarios' && { backgroundColor: theme.primary }]}
               onPress={() => setActiveTab('Usuarios')}
           >
-              <Text style={[styles.tabText, activeTab === 'Usuarios' && styles.activeTabText]}>
+              <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'Usuarios' && styles.activeTabText]}>
                 Usuarios
               </Text>
           </TouchableOpacity>
           <TouchableOpacity 
-              style={[styles.tab, activeTab === 'Reportes' && styles.activeTab]}
+              style={[styles.tab, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }, activeTab === 'Reportes' && { backgroundColor: theme.primary }]}
               onPress={() => setActiveTab('Reportes')}
           >
-              <Text style={[styles.tabText, activeTab === 'Reportes' && styles.activeTabText]}>
+              <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'Reportes' && styles.activeTabText]}>
                 Reportes
               </Text>
           </TouchableOpacity>
           <TouchableOpacity 
-              style={[styles.tab, activeTab === 'Auditoría' && styles.activeTab]}
+              style={[styles.tab, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }, activeTab === 'Auditoría' && { backgroundColor: theme.primary }]}
               onPress={() => setActiveTab('Auditoría')}
           >
-              <Text style={[styles.tabText, activeTab === 'Auditoría' && styles.activeTabText]}>
+              <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'Auditoría' && styles.activeTabText]}>
                 Auditoría
               </Text>
           </TouchableOpacity>
             <TouchableOpacity 
-              style={[styles.tab, activeTab === 'Contraseñas' && styles.activeTab]}
+              style={[styles.tab, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }, activeTab === 'Contraseñas' && { backgroundColor: theme.primary }]}
               onPress={() => setActiveTab('Contraseñas')}
             >
-              <Text style={[styles.tabText, activeTab === 'Contraseñas' && styles.activeTabText]}>
+              <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'Contraseñas' && styles.activeTabText]}>
                 Contraseñas
               </Text>
             </TouchableOpacity>
@@ -857,26 +970,26 @@ export default function AdminScreen() {
         {/* Content based on active tab */}
         {activeTab === 'Usuarios' && (
           <>
-        <Text style={styles.sectionTitle}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>
               Gestión de Usuarios ({users.length})
         </Text>
 
             {/* Buscador */}
-            <View style={styles.searchContainer}>
-              <Ionicons name="search-outline" size={20} color="#6B7280" style={styles.searchIcon} />
+            <View style={[styles.searchContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <Ionicons name="search-outline" size={20} color={theme.textSecondary} style={styles.searchIcon} />
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, { color: theme.text }]}
                 placeholder="Buscar por nombre o email..."
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={theme.textSecondary}
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity
                   onPress={() => setSearchQuery('')}
                   style={styles.clearButton}
                 >
-                  <Ionicons name="close-circle" size={20} color="#6B7280" />
+                  <Ionicons name="close-circle" size={20} color={theme.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -894,9 +1007,9 @@ export default function AdminScreen() {
               if (filteredUsers.length === 0) {
                 return (
                   <Card style={styles.emptyCard}>
-                    <Ionicons name="search-outline" size={48} color="#9CA3AF" />
-                    <Text style={styles.emptyText}>No se encontraron usuarios</Text>
-                    <Text style={styles.emptySubtext}>
+                    <Ionicons name="search-outline" size={48} color={theme.textSecondary} />
+                    <Text style={[styles.emptyText, { color: theme.text }]}>No se encontraron usuarios</Text>
+                    <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
                       Intenta con otro término de búsqueda
                     </Text>
                   </Card>
@@ -909,38 +1022,42 @@ export default function AdminScreen() {
                   activeOpacity={0.7}
                   onPress={() => handleViewUser(userItem)}
                 >
-                  <Card style={styles.userCard}>
+                  <Card style={[styles.userCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
                     <View style={styles.userRow}>
-                      <View style={[styles.avatar, { backgroundColor: '#2563EB' }]}>
+                      <View style={[styles.avatar, { backgroundColor: theme.primary }]}>
                         <Text style={styles.avatarText}>{getInitials(userItem.name)}</Text>
                       </View>
 
-              <View style={styles.userInfo}>
-                <Text style={styles.userName}>{userItem.name}</Text>
+                      <View style={styles.userInfo}>
+                        <Text style={[styles.userName, { color: theme.text }]}>{userItem.name}</Text>
                         <View style={[styles.roleBadge, { backgroundColor: getRoleColor(userItem.role) + '20' }]}>
                           <Text style={[styles.roleText, { color: getRoleColor(userItem.role) }]}>
                             {getRoleLabel(userItem.role)}
                           </Text>
                         </View>
-                        <Text style={styles.userEmail}>{userItem.email}</Text>
+                        <Text style={[styles.userEmail, { color: theme.textSecondary }]}>{userItem.email}</Text>
+
                         <View style={styles.userStatsRow}>
-                          <View style={styles.userStatItem}>
+                          <View style={[styles.userStatItem, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }]}>
                             <Ionicons name="star" size={14} color="#F59E0B" />
-                            <Text style={styles.userStatText}>{userItem.experience_points} XP</Text>
+                            <Text style={[styles.userStatText, { color: theme.text }]}>{userItem.experience_points} XP</Text>
                           </View>
-                          <View style={styles.userStatItem}>
-                            <Ionicons name="trending-up" size={14} color="#2563EB" />
-                            <Text style={styles.userStatText}>Nivel {userItem.financial_level}</Text>
+
+                          <View style={[styles.userStatItem, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }]}>
+                            <Ionicons name="trending-up" size={14} color={theme.primary} />
+                            <Text style={[styles.userStatText, { color: theme.text }]}>Nivel {userItem.financial_level}</Text>
                           </View>
-                          {userItem.suspended && (
-                            <View style={[styles.userStatItem, { backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }]}>
+
+                          {isUserSuspended(userItem) && (
+                            <View style={[styles.userStatItem, { backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }]}> 
                               <Ionicons name="ban" size={14} color="#EF4444" />
                               <Text style={[styles.userStatText, { color: '#EF4444' }]}>Suspendido</Text>
-                  </View>
-                )}
-              </View>
-                        <Text style={styles.userDate}>Registrado {formatDate(userItem.created_at)}</Text>
-            </View>
+                            </View>
+                          )}
+                        </View>
+
+                        <Text style={[styles.userDate, { color: theme.textSecondary }]}>Registrado {formatDate(userItem.created_at)}</Text>
+                      </View>
                     </View>
                   </Card>
                 </TouchableOpacity>
@@ -953,76 +1070,76 @@ export default function AdminScreen() {
           <>
             <View style={styles.reportsHeader}>
               <View>
-                <Text style={styles.reportsTitle}>Reportes y Estadísticas</Text>
-                <Text style={styles.reportsSubtitle}>
+                <Text style={[styles.reportsTitle, { color: theme.text }]}>Reportes y Estadísticas</Text>
+                <Text style={[styles.reportsSubtitle, { color: theme.textSecondary }]}>
                   Exporta reportes de la actividad de la plataforma
             </Text>
               </View>
               <View style={styles.exportButtons}>
                 <TouchableOpacity 
-                  style={styles.exportButton}
+                  style={[styles.exportButton, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#EFF6FF' }]}
                   onPress={() => exportReports('CSV')}
                 >
-                  <Ionicons name="download-outline" size={18} color="#2563EB" />
-                  <Text style={styles.exportButtonText}>Exportar CSV</Text>
+                  <Ionicons name="download-outline" size={18} color={theme.primary} />
+                  <Text style={[styles.exportButtonText, { color: theme.primary }]}>Exportar CSV</Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.exportButton}
+                  style={[styles.exportButton, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#EFF6FF' }]}
                   onPress={() => exportReports('JSON')}
                 >
-                  <Ionicons name="download-outline" size={18} color="#2563EB" />
-                  <Text style={styles.exportButtonText}>Exportar JSON</Text>
+                  <Ionicons name="download-outline" size={18} color={theme.primary} />
+                  <Text style={[styles.exportButtonText, { color: theme.primary }]}>Exportar JSON</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
             {loading ? (
               <View style={styles.loadingReportsContainer}>
-                <ActivityIndicator size="large" color="#2563EB" />
-                <Text style={styles.loadingText}>Cargando reportes...</Text>
+                <ActivityIndicator size="large" color={theme.primary} />
+                <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Cargando reportes...</Text>
               </View>
             ) : reports ? (
               <>
                 <View style={styles.reportCards}>
-                  <Card style={styles.reportCard}>
-                    <View style={[styles.reportIconContainer, { backgroundColor: '#DBEAFE' }]}>
-                      <Ionicons name="people" size={32} color="#2563EB" />
+                  <Card style={[styles.reportCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
+                    <View style={[styles.reportIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#DBEAFE' }]}>
+                      <Ionicons name="people" size={32} color={theme.primary} />
                     </View>
-                    <Text style={styles.reportValue}>{reports.totalUsers}</Text>
-                    <Text style={styles.reportLabel}>Usuarios Registrados</Text>
-                    <Text style={styles.reportSubtext}>
+                    <Text style={[styles.reportValue, { color: theme.text }]}>{reports.totalUsers}</Text>
+                    <Text style={[styles.reportLabel, { color: theme.text }]}>Usuarios Registrados</Text>
+                    <Text style={[styles.reportSubtext, { color: theme.textSecondary }]}>
                       {reports.activeUsers} activos • {reports.suspendedUsers} suspendidos
                     </Text>
                   </Card>
 
-                  <Card style={styles.reportCard}>
-                    <View style={[styles.reportIconContainer, { backgroundColor: '#D1FAE5' }]}>
+                  <Card style={[styles.reportCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
+                    <View style={[styles.reportIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#D1FAE5' }]}>
                       <Ionicons name="card" size={32} color="#10B981" />
                     </View>
-                    <Text style={styles.reportValue}>{reports.totalPayments}</Text>
-                    <Text style={styles.reportLabel}>Pagos Totales</Text>
-                    <Text style={styles.reportSubtext}>
+                    <Text style={[styles.reportValue, { color: theme.text }]}>{reports.totalPayments}</Text>
+                    <Text style={[styles.reportLabel, { color: theme.text }]}>Pagos Totales</Text>
+                    <Text style={[styles.reportSubtext, { color: theme.textSecondary }]}>
                       {reports.totalCompletedPayments} completados • {reports.totalPendingPayments} pendientes
                     </Text>
                   </Card>
 
-                  <Card style={styles.reportCard}>
-                    <View style={[styles.reportIconContainer, { backgroundColor: '#FEF3C7' }]}>
+                  <Card style={[styles.reportCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
+                    <View style={[styles.reportIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#FEF3C7' }]}>
                       <Ionicons name="cash" size={32} color="#F59E0B" />
                     </View>
-                    <Text style={styles.reportValue}>
+                    <Text style={[styles.reportValue, { color: theme.text }]}>
                       ${reports.totalAmount.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
-                    <Text style={styles.reportLabel}>Monto Total</Text>
-                    <Text style={styles.reportSubtext}>
+                    <Text style={[styles.reportLabel, { color: theme.text }]}>Monto Total</Text>
+                    <Text style={[styles.reportSubtext, { color: theme.textSecondary }]}>
                       ${reports.totalPendingAmount.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pendiente
                     </Text>
                   </Card>
                 </View>
 
                 {/* Gráfico de Barras con Escala Dinámica */}
-                <Card style={styles.chartCard}>
-                  <Text style={styles.chartTitle}>Resumen General</Text>
+                <Card style={[styles.chartCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
+                  <Text style={[styles.chartTitle, { color: theme.text }]}>Resumen General</Text>
                   <View style={styles.barChart}>
                     {(() => {
                       const maxValue = Math.max(
@@ -1037,8 +1154,8 @@ export default function AdminScreen() {
                       return (
                         <>
                           <View style={styles.barItem}>
-                            <Text style={styles.barLabel}>Usuarios</Text>
-                            <View style={styles.barContainer}>
+                            <Text style={[styles.barLabel, { color: theme.textSecondary }]}>Usuarios</Text>
+                            <View style={[styles.barContainer, { backgroundColor: theme.border }]}>
                               <View 
                                 style={[
                                   styles.bar, 
@@ -1049,11 +1166,11 @@ export default function AdminScreen() {
                                 ]} 
                               />
                             </View>
-                            <Text style={styles.barValue}>{reports.totalUsers}</Text>
+                            <Text style={[styles.barValue, { color: theme.text }]}>{reports.totalUsers}</Text>
                           </View>
                           <View style={styles.barItem}>
-                            <Text style={styles.barLabel}>Pagos</Text>
-                            <View style={styles.barContainer}>
+                            <Text style={[styles.barLabel, { color: theme.textSecondary }]}>Pagos</Text>
+                            <View style={[styles.barContainer, { backgroundColor: theme.border }]}>
                               <View 
                                 style={[
                                   styles.bar, 
@@ -1064,11 +1181,11 @@ export default function AdminScreen() {
                                 ]} 
                               />
                             </View>
-                            <Text style={styles.barValue}>{reports.totalPayments}</Text>
+                            <Text style={[styles.barValue, { color: theme.text }]}>{reports.totalPayments}</Text>
                           </View>
                           <View style={styles.barItem}>
-                            <Text style={styles.barLabel}>XP Total</Text>
-                            <View style={styles.barContainer}>
+                            <Text style={[styles.barLabel, { color: theme.textSecondary }]}>XP Total</Text>
+                            <View style={[styles.barContainer, { backgroundColor: theme.border }]}>
                               <View 
                                 style={[
                                   styles.bar, 
@@ -1079,7 +1196,7 @@ export default function AdminScreen() {
                                 ]} 
                               />
                             </View>
-                            <Text style={styles.barValue}>{reports.totalXP}</Text>
+                            <Text style={[styles.barValue, { color: theme.text }]}>{reports.totalXP}</Text>
                           </View>
                         </>
                       );
@@ -1088,8 +1205,8 @@ export default function AdminScreen() {
                 </Card>
 
                 {/* Estadísticas de Pagos por Estado */}
-                <Card style={styles.chartCard}>
-                  <Text style={styles.chartTitle}>Pagos por Estado</Text>
+                <Card style={[styles.chartCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
+                  <Text style={[styles.chartTitle, { color: theme.text }]}>Pagos por Estado</Text>
                   <View style={styles.barChart}>
                     {(() => {
                       const statusData = [
@@ -1103,8 +1220,8 @@ export default function AdminScreen() {
                       
                       return statusData.map((status, index) => (
                         <View key={index} style={styles.barItem}>
-                          <Text style={styles.barLabel}>{status.label}</Text>
-                          <View style={styles.barContainer}>
+                          <Text style={[styles.barLabel, { color: theme.textSecondary }]}>{status.label}</Text>
+                          <View style={[styles.barContainer, { backgroundColor: theme.border }]}>
                             <View 
                               style={[
                                 styles.bar, 
@@ -1115,7 +1232,7 @@ export default function AdminScreen() {
                               ]} 
                             />
                           </View>
-                          <Text style={styles.barValue}>{status.value}</Text>
+                          <Text style={[styles.barValue, { color: theme.text }]}>{status.value}</Text>
                         </View>
                       ));
                     })()}
@@ -1124,51 +1241,51 @@ export default function AdminScreen() {
 
                 {/* Métricas de Crecimiento */}
                 <View style={styles.metricsContainer}>
-                  <Card style={styles.metricCard}>
+                  <Card style={[styles.metricCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
                     <View style={styles.metricHeader}>
-                      <Ionicons name="trending-up-outline" size={20} color="#2563EB" />
-                      <Text style={styles.metricTitle}>Métricas de Crecimiento</Text>
+                      <Ionicons name="trending-up-outline" size={20} color={theme.primary} />
+                      <Text style={[styles.metricTitle, { color: theme.text }]}>Métricas de Crecimiento</Text>
                     </View>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Tasa de Usuarios Activos</Text>
-                      <Text style={styles.metricValue}>
+                    <View style={[styles.metricItem, { borderBottomColor: theme.border }]}>
+                      <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>Tasa de Usuarios Activos</Text>
+                      <Text style={[styles.metricValue, { color: theme.text }]}>
                         {reports.totalUsers > 0 
                           ? Math.round((reports.activeUsers / reports.totalUsers) * 100) 
                           : 0}%
                       </Text>
                     </View>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Tasa de Completación de Pagos</Text>
-                      <Text style={styles.metricValue}>
+                    <View style={[styles.metricItem, { borderBottomColor: theme.border }]}>
+                      <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>Tasa de Completación de Pagos</Text>
+                      <Text style={[styles.metricValue, { color: theme.text }]}>
                         {reports.totalPayments > 0 
                           ? Math.round((reports.totalCompletedPayments / reports.totalPayments) * 100) 
                           : 0}%
                       </Text>
                     </View>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Nivel Promedio</Text>
-                      <Text style={styles.metricValue}>{reports.averageLevel}</Text>
+                    <View style={[styles.metricItem, { borderBottomColor: theme.border }]}>
+                      <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>Nivel Promedio</Text>
+                      <Text style={[styles.metricValue, { color: theme.text }]}>{reports.averageLevel}</Text>
                     </View>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Usuarios Registrados (30 días)</Text>
-                      <Text style={styles.metricValue}>{reports.recentUsersCount}</Text>
+                    <View style={[styles.metricItem, { borderBottomColor: theme.border }]}>
+                      <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>Usuarios Registrados (30 días)</Text>
+                      <Text style={[styles.metricValue, { color: theme.text }]}>{reports.recentUsersCount}</Text>
                     </View>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Pagos Creados (30 días)</Text>
-                      <Text style={styles.metricValue}>{reports.recentPaymentsCount}</Text>
+                    <View style={[styles.metricItem, { borderBottomWidth: 0 }]}>
+                      <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>Pagos Creados (30 días)</Text>
+                      <Text style={[styles.metricValue, { color: theme.text }]}>{reports.recentPaymentsCount}</Text>
                     </View>
                   </Card>
                 </View>
 
                 {/* Distribución por Categoría */}
                 {Object.keys(reports.paymentsByCategory).length > 0 && (
-                  <Card style={styles.chartCard}>
-                    <Text style={styles.chartTitle}>Pagos por Categoría</Text>
+                  <Card style={[styles.chartCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
+                    <Text style={[styles.chartTitle, { color: theme.text }]}>Pagos por Categoría</Text>
                     <View style={styles.categoryList}>
                       {Object.entries(reports.paymentsByCategory).map(([category, count]) => (
                         <View key={category} style={styles.categoryItem}>
-                          <Text style={styles.categoryLabel}>{category}</Text>
-                          <Text style={styles.categoryValue}>{count}</Text>
+                          <Text style={[styles.categoryLabel, { color: theme.textSecondary }]}>{category}</Text>
+                          <Text style={[styles.categoryValue, { color: theme.text }]}>{count}</Text>
                         </View>
                       ))}
                     </View>
@@ -1177,15 +1294,15 @@ export default function AdminScreen() {
 
                 {/* Distribución por Rol */}
                 {Object.keys(reports.usersByRole).length > 0 && (
-                  <Card style={styles.chartCard}>
-                    <Text style={styles.chartTitle}>Usuarios por Rol</Text>
+                  <Card style={[styles.chartCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
+                    <Text style={[styles.chartTitle, { color: theme.text }]}>Usuarios por Rol</Text>
                     <View style={styles.categoryList}>
                       {Object.entries(reports.usersByRole).map(([role, count]) => (
                         <View key={role} style={styles.categoryItem}>
-                          <Text style={styles.categoryLabel}>
-                            {role === 'ADMIN' ? 'Administradores' : 'Usuarios'}
+                          <Text style={[styles.categoryLabel, { color: theme.textSecondary }]}>
+                            {role.toString().toLowerCase() === 'admin' ? 'Administradores' : 'Usuarios'}
                           </Text>
-                          <Text style={styles.categoryValue}>{count}</Text>
+                          <Text style={[styles.categoryValue, { color: theme.text }]}>{count}</Text>
                         </View>
                       ))}
                     </View>
@@ -1193,10 +1310,10 @@ export default function AdminScreen() {
                 )}
               </>
             ) : (
-              <Card>
+              <Card style={[{ backgroundColor: theme.card, borderColor: theme.border }] as any}>
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="stats-chart-outline" size={48} color="#9CA3AF" />
-                  <Text style={styles.emptyText}>No hay datos para mostrar</Text>
+                  <Ionicons name="stats-chart-outline" size={48} color={theme.textSecondary} />
+                  <Text style={[styles.emptyText, { color: theme.text }]}>No hay datos para mostrar</Text>
                 </View>
               </Card>
             )}
@@ -1205,29 +1322,29 @@ export default function AdminScreen() {
 
         {activeTab === 'Auditoría' && (
           <>
-            <Text style={styles.sectionTitle}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
               Registro de Auditoría ({auditLogs.length})
             </Text>
 
             {auditLogs.length === 0 ? (
-              <Card>
+              <Card style={[{ backgroundColor: theme.card, borderColor: theme.border }] as any}>
                 <View style={styles.emptyContainer}>
-                  <Ionicons name="document-text-outline" size={48} color="#9CA3AF" />
-                  <Text style={styles.emptyText}>No hay registros de auditoría aún</Text>
-                  <Text style={styles.emptySubtext}>
+                  <Ionicons name="document-text-outline" size={48} color={theme.textSecondary} />
+                  <Text style={[styles.emptyText, { color: theme.text }]}>No hay registros de auditoría aún</Text>
+                  <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
                     Los registros aparecerán aquí después de ejecutar la migración SQL de la tabla audit_logs
                   </Text>
                 </View>
               </Card>
             ) : (
               auditLogs.map((log) => (
-                <Card key={log.id} style={styles.auditCard}>
+                <Card key={log.id} style={[styles.auditCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
                   <View style={styles.auditRow}>
                     <View style={[styles.avatar, { backgroundColor: '#DC2626' }]}>
                       <Text style={styles.avatarText}>{getInitials(log.admin_name)}</Text>
                     </View>
                     <View style={styles.auditInfo}>
-                      <Text style={styles.auditAdminName}>{log.admin_name}</Text>
+                      <Text style={[styles.auditAdminName, { color: theme.text }]}>{log.admin_name}</Text>
                       <View style={[
                         styles.auditBadge,
                         { backgroundColor: getActionColor(log.action_type) + '20' }
@@ -1245,16 +1362,16 @@ export default function AdminScreen() {
                         </Text>
                       </View>
                       {log.target_user_name && (
-                        <Text style={styles.auditTarget}>
+                        <Text style={[styles.auditTarget, { color: theme.textSecondary }]}>
                           Usuario: {log.target_user_name}
                         </Text>
                       )}
                       {log.details && (
-                        <Text style={styles.auditDetails}>
+                        <Text style={[styles.auditDetails, { color: theme.textSecondary }]}>
                           {JSON.stringify(log.details)}
                         </Text>
                       )}
-                      <Text style={styles.auditDate}>{formatDate(log.created_at)}</Text>
+                      <Text style={[styles.auditDate, { color: theme.textSecondary }]}>{formatDate(log.created_at)}</Text>
                     </View>
                   </View>
                 </Card>
@@ -1265,56 +1382,56 @@ export default function AdminScreen() {
 
         {activeTab === 'Contraseñas' && (
           <>
-            <Text style={styles.sectionTitle}>Cambiar Mi Contraseña</Text>
-            <Card style={styles.passwordCard}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Cambiar Mi Contraseña</Text>
+            <Card style={[styles.passwordCard, { backgroundColor: theme.card, borderColor: theme.border }] as any}>
               <View style={styles.passwordInfo}>
-                <Ionicons name="lock-closed" size={48} color="#2563EB" />
-                <Text style={styles.passwordTitle}>Actualizar Contraseña</Text>
-                <Text style={styles.passwordSubtitle}>
+                <Ionicons name="lock-closed" size={48} color={theme.primary} />
+                <Text style={[styles.passwordTitle, { color: theme.text }]}>Actualizar Contraseña</Text>
+                <Text style={[styles.passwordSubtitle, { color: theme.textSecondary }]}>
                   Ingresa tu contraseña actual y la nueva contraseña
                 </Text>
               </View>
 
               <View style={styles.passwordForm}>
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Contraseña Actual</Text>
+                  <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Contraseña Actual</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border, color: theme.text }]}
                     placeholder="••••••••"
                     secureTextEntry
                     value={myCurrentPassword}
                     onChangeText={setMyCurrentPassword}
-                    placeholderTextColor="#9CA3AF"
+                    placeholderTextColor={theme.textSecondary}
                   />
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Nueva Contraseña</Text>
+                  <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Nueva Contraseña</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border, color: theme.text }]}
                     placeholder="••••••••"
                     secureTextEntry
                     value={myNewPassword}
                     onChangeText={setMyNewPassword}
-                    placeholderTextColor="#9CA3AF"
+                    placeholderTextColor={theme.textSecondary}
                   />
-                  <Text style={styles.helpText}>Mínimo 6 caracteres</Text>
+                  <Text style={[styles.helpText, { color: theme.textSecondary }]}>Mínimo 6 caracteres</Text>
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Confirmar Nueva Contraseña</Text>
+                  <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Confirmar Nueva Contraseña</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border, color: theme.text }]}
                     placeholder="••••••••"
                     secureTextEntry
                     value={myConfirmPassword}
                     onChangeText={setMyConfirmPassword}
-                    placeholderTextColor="#9CA3AF"
+                    placeholderTextColor={theme.textSecondary}
                   />
                 </View>
 
               <TouchableOpacity 
-                  style={styles.updatePasswordButton}
+                  style={[styles.updatePasswordButton, { backgroundColor: theme.primary }]}
                   onPress={handleChangeMyPassword}
               >
                   <Text style={styles.updatePasswordButtonText}>Actualizar Contraseña</Text>
@@ -1333,21 +1450,21 @@ export default function AdminScreen() {
         onRequestClose={() => setShowViewModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Detalles del Usuario</Text>
+          <View style={[styles.modalContainer, { backgroundColor: theme.card }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Detalles del Usuario</Text>
               <TouchableOpacity onPress={() => setShowViewModal(false)}>
-                <Ionicons name="close" size={24} color="#6B7280" />
+                <Ionicons name="close" size={24} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>
 
             {selectedUser && (
               <ScrollView style={styles.modalContent}>
                 <View style={styles.detailSection}>
-                  <View style={[styles.avatarLarge, { backgroundColor: '#2563EB' }]}>
+                  <View style={[styles.avatarLarge, { backgroundColor: theme.primary }]}>
                     <Text style={styles.avatarLargeText}>{getInitials(selectedUser.name)}</Text>
                   </View>
-                  <Text style={styles.detailName}>{selectedUser.name}</Text>
+                  <Text style={[styles.detailName, { color: theme.text }]}>{selectedUser.name}</Text>
                   <View style={[styles.roleBadgeLarge, { backgroundColor: getRoleColor(selectedUser.role) + '20' }]}>
                     <Text style={[styles.roleTextLarge, { color: getRoleColor(selectedUser.role) }]}>
                       {getRoleLabel(selectedUser.role)}
@@ -1357,25 +1474,25 @@ export default function AdminScreen() {
 
                 <View style={styles.detailInfo}>
                   <View style={styles.detailRow}>
-                    <Ionicons name="mail-outline" size={20} color="#6B7280" />
+                    <Ionicons name="mail-outline" size={20} color={theme.textSecondary} />
                     <View style={styles.detailTextContainer}>
-                      <Text style={styles.detailLabel}>Email</Text>
-                      <Text style={styles.detailValue}>{selectedUser.email}</Text>
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>Email</Text>
+                      <Text style={[styles.detailValue, { color: theme.text }]}>{selectedUser.email}</Text>
                     </View>
                   </View>
 
                   <View style={styles.detailRow}>
-                    <Ionicons name="calendar-outline" size={20} color="#6B7280" />
+                    <Ionicons name="calendar-outline" size={20} color={theme.textSecondary} />
                     <View style={styles.detailTextContainer}>
-                      <Text style={styles.detailLabel}>Fecha de Registro</Text>
-                      <Text style={styles.detailValue}>{formatDate(selectedUser.created_at)}</Text>
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>Fecha de Registro</Text>
+                      <Text style={[styles.detailValue, { color: theme.text }]}>{formatDate(selectedUser.created_at)}</Text>
                     </View>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Ionicons name="checkmark-circle-outline" size={20} color={selectedUser.email_verified ? '#10B981' : '#EF4444'} />
                     <View style={styles.detailTextContainer}>
-                      <Text style={styles.detailLabel}>Estado de Verificación</Text>
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>Estado de Verificación</Text>
                       <Text style={[styles.detailValue, { color: selectedUser.email_verified ? '#10B981' : '#EF4444' }]}>
                         {selectedUser.email_verified ? 'Verificado' : 'No Verificado'}
                       </Text>
@@ -1385,108 +1502,126 @@ export default function AdminScreen() {
                   <View style={styles.detailRow}>
                     <Ionicons name="star-outline" size={20} color="#F59E0B" />
                     <View style={styles.detailTextContainer}>
-                      <Text style={styles.detailLabel}>Puntos de Experiencia</Text>
-                      <Text style={styles.detailValue}>{selectedUser.experience_points} XP</Text>
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>Puntos de Experiencia</Text>
+                      <Text style={[styles.detailValue, { color: theme.text }]}>{selectedUser.experience_points} XP</Text>
                     </View>
                   </View>
 
                   <View style={styles.detailRow}>
-                    <Ionicons name="trending-up-outline" size={20} color="#2563EB" />
+                    <Ionicons name="trending-up-outline" size={20} color={theme.primary} />
                     <View style={styles.detailTextContainer}>
-                      <Text style={styles.detailLabel}>Nivel Financiero</Text>
-                      <Text style={styles.detailValue}>Nivel {selectedUser.financial_level}</Text>
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>Nivel Financiero</Text>
+                      <Text style={[styles.detailValue, { color: theme.text }]}>Nivel {selectedUser.financial_level}</Text>
                     </View>
                   </View>
 
                   <View style={styles.detailRow}>
-                    <Ionicons name={selectedUser.suspended ? 'ban-outline' : 'checkmark-circle-outline'} size={20} color={selectedUser.suspended ? '#EF4444' : '#10B981'} />
+                    <Ionicons
+                      name={isUserSuspended(selectedUser) ? 'ban-outline' : 'checkmark-circle-outline'}
+                      size={20}
+                      color={isUserSuspended(selectedUser) ? '#EF4444' : '#10B981'}
+                    />
                     <View style={styles.detailTextContainer}>
-                      <Text style={styles.detailLabel}>Estado de Cuenta</Text>
-                      <Text style={[styles.detailValue, { color: selectedUser.suspended ? '#EF4444' : '#10B981' }]}>
-                        {selectedUser.suspended ? 'Suspendido' : 'Activo'}
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>Estado de Cuenta</Text>
+                      <Text style={[styles.detailValue, { color: isUserSuspended(selectedUser) ? '#EF4444' : '#10B981' }]}>
+                        {isUserSuspended(selectedUser) ? 'Suspendido' : 'Activo'}
                       </Text>
                     </View>
                   </View>
                 </View>
 
                  {/* Botones de Acción dentro del Modal */}
-                 <View style={styles.modalActionsContainer}>
-                   <Text style={styles.modalActionsTitle}>Acciones</Text>
+                 <View style={[styles.modalActionsContainer, { borderTopColor: theme.border }]}>
+                   <Text style={[styles.modalActionsTitle, { color: theme.text }]}>Acciones</Text>
                    <View style={styles.modalActionsList}>
               <TouchableOpacity 
-                       style={styles.modalActionButton}
+                       style={[styles.modalActionButton, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border }]}
                        onPress={() => {
                          setShowViewModal(false);
                          handleChangePassword(selectedUser);
                        }}
               >
-                       <Ionicons name="key-outline" size={20} color="#2563EB" />
-                       <Text style={styles.modalActionText}>Cambiar Contraseña</Text>
-                       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+                       <Ionicons name="key-outline" size={20} color={theme.primary} />
+                       <Text style={[styles.modalActionText, { color: theme.text }]}>Cambiar Contraseña</Text>
+                       <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
               </TouchableOpacity>
 
               <TouchableOpacity 
-                       style={styles.modalActionButton}
+                       style={[styles.modalActionButton, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border }]}
                        onPress={() => {
                          setShowViewModal(false);
                          handleChangeRole(selectedUser);
                        }}
               >
-                       <Ionicons name="person-outline" size={20} color="#2563EB" />
-                       <Text style={styles.modalActionText}>Cambiar Rol</Text>
-                       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+                       <Ionicons name="person-outline" size={20} color={theme.primary} />
+                       <Text style={[styles.modalActionText, { color: theme.text }]}>Cambiar Rol</Text>
+                       <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
               </TouchableOpacity>
 
               <TouchableOpacity 
-                       style={styles.modalActionButton}
+                       style={[styles.modalActionButton, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border }]}
                        onPress={() => {
                          setShowViewModal(false);
                          handleAssignXP(selectedUser);
                        }}
                      >
-                       <Ionicons name="star-outline" size={20} color="#2563EB" />
-                       <Text style={styles.modalActionText}>Asignar XP</Text>
-                       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+                       <Ionicons name="star-outline" size={20} color={theme.primary} />
+                       <Text style={[styles.modalActionText, { color: theme.text }]}>Asignar XP</Text>
+                       <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
               </TouchableOpacity>
 
               <TouchableOpacity 
-                       style={styles.modalActionButton}
+                       style={[styles.modalActionButton, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border }]}
                        onPress={() => {
                          setShowViewModal(false);
                          handleChangeLevel(selectedUser);
                        }}
                      >
-                       <Ionicons name="trending-up-outline" size={20} color="#2563EB" />
-                       <Text style={styles.modalActionText}>Cambiar Nivel</Text>
-                       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+                       <Ionicons name="trending-up-outline" size={20} color={theme.primary} />
+                       <Text style={[styles.modalActionText, { color: theme.text }]}>Cambiar Nivel</Text>
+                       <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
                      </TouchableOpacity>
 
-                     <TouchableOpacity 
-                       style={[styles.modalActionButton, styles.modalActionButtonSuspend]}
-                       onPress={() => {
-                         setShowViewModal(false);
-                         handleSuspendUser(selectedUser);
-                       }}
-                     >
-                       <Ionicons name="ban-outline" size={20} color="#EF4444" />
-                       <Text style={[styles.modalActionText, { color: '#EF4444' }]}>Suspender Usuario</Text>
-                       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-                     </TouchableOpacity>
+                     {isUserSuspended(selectedUser) ? (
+                       <TouchableOpacity 
+                         style={[
+                           styles.modalActionButton,
+                           styles.modalActionButtonEnable,
+                           { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F0FDF4', borderColor: theme.border },
+                         ]}
+                         onPress={() => {
+                           setShowViewModal(false);
+                           handleEnableUser(selectedUser);
+                         }}
+                       >
+                         <Ionicons name="checkmark-circle-outline" size={20} color="#10B981" />
+                         <Text style={[styles.modalActionText, { color: '#10B981' }]}>Habilitar Usuario</Text>
+                         <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
+                       </TouchableOpacity>
+                     ) : (
+                       <TouchableOpacity 
+                         style={[
+                           styles.modalActionButton,
+                           styles.modalActionButtonSuspend,
+                           { backgroundColor: resolvedMode === 'dark' ? theme.border : '#FEF2F2', borderColor: theme.border },
+                         ]}
+                         onPress={() => {
+                           setShowViewModal(false);
+                           handleSuspendUser(selectedUser);
+                         }}
+                       >
+                         <Ionicons name="ban-outline" size={20} color="#EF4444" />
+                         <Text style={[styles.modalActionText, { color: '#EF4444' }]}>Suspender Usuario</Text>
+                         <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
+                       </TouchableOpacity>
+                     )}
 
                      <TouchableOpacity 
-                       style={[styles.modalActionButton, styles.modalActionButtonEnable]}
-                       onPress={() => {
-                         setShowViewModal(false);
-                         handleEnableUser(selectedUser);
-                       }}
-              >
-                       <Ionicons name="checkmark-circle-outline" size={20} color="#10B981" />
-                       <Text style={[styles.modalActionText, { color: '#10B981' }]}>Habilitar Usuario</Text>
-                       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-                     </TouchableOpacity>
-
-                     <TouchableOpacity 
-                       style={[styles.modalActionButton, styles.modalActionButtonDelete]}
+                       style={[
+                         styles.modalActionButton,
+                         styles.modalActionButtonDelete,
+                         { backgroundColor: resolvedMode === 'dark' ? theme.border : '#FEF2F2', borderColor: theme.border },
+                       ]}
                        onPress={() => {
                          setShowViewModal(false);
                          handleDeleteUser(selectedUser);
@@ -1494,7 +1629,7 @@ export default function AdminScreen() {
                      >
                        <Ionicons name="trash-outline" size={20} color="#EF4444" />
                        <Text style={[styles.modalActionText, { color: '#EF4444' }]}>Eliminar Usuario</Text>
-                       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+                       <Ionicons name="chevron-forward" size={20} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>
                  </View>
@@ -1512,32 +1647,32 @@ export default function AdminScreen() {
         onRequestClose={() => setShowXPModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.inputModalContainer}>
-            <Text style={styles.inputModalTitle}>Asignar Puntos de Experiencia</Text>
-            <Text style={styles.inputModalSubtitle}>
+          <View style={[styles.inputModalContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.inputModalTitle, { color: theme.text }]}>Asignar Puntos de Experiencia</Text>
+            <Text style={[styles.inputModalSubtitle, { color: theme.textSecondary }]}>
               Usuario: {selectedUser?.name}
             </Text>
             <TextInput
-              style={styles.inputModalInput}
+              style={[styles.inputModalInput, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border, color: theme.text }]}
               placeholder="Cantidad de XP"
               keyboardType="numeric"
               value={xpAmount}
               onChangeText={setXpAmount}
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.textSecondary}
             />
             <View style={styles.inputModalButtons}>
               <TouchableOpacity
-                style={styles.inputModalCancel}
+                style={[styles.inputModalCancel, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }]}
                 onPress={() => {
                   setShowXPModal(false);
                   setXpAmount('');
                   setSelectedUser(null);
                 }}
               >
-                <Text style={styles.inputModalCancelText}>Cancelar</Text>
+                <Text style={[styles.inputModalCancelText, { color: theme.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.inputModalSave}
+                style={[styles.inputModalSave, { backgroundColor: theme.primary }]}
                 onPress={handleSaveXP}
               >
                 <Text style={styles.inputModalSaveText}>Asignar</Text>
@@ -1555,30 +1690,30 @@ export default function AdminScreen() {
         onRequestClose={() => setShowPasswordModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.inputModalContainer}>
-            <Text style={styles.inputModalTitle}>Cambiar Contraseña</Text>
-            <Text style={styles.inputModalSubtitle}>
+          <View style={[styles.inputModalContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.inputModalTitle, { color: theme.text }]}>Cambiar Contraseña</Text>
+            <Text style={[styles.inputModalSubtitle, { color: theme.textSecondary }]}>
               Usuario: {selectedUser?.name}
             </Text>
             <TextInput
-              style={styles.inputModalInput}
+              style={[styles.inputModalInput, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border, color: theme.text }]}
               placeholder="Nueva contraseña"
               secureTextEntry
               value={newPassword}
               onChangeText={setNewPassword}
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.textSecondary}
             />
             <TextInput
-              style={styles.inputModalInput}
+              style={[styles.inputModalInput, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border, color: theme.text }]}
               placeholder="Confirmar contraseña"
               secureTextEntry
               value={confirmPassword}
               onChangeText={setConfirmPassword}
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.textSecondary}
             />
             <View style={styles.inputModalButtons}>
               <TouchableOpacity
-                style={styles.inputModalCancel}
+                style={[styles.inputModalCancel, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }]}
                 onPress={() => {
                   setShowPasswordModal(false);
                   setNewPassword('');
@@ -1586,10 +1721,10 @@ export default function AdminScreen() {
                   setSelectedUser(null);
                 }}
               >
-                <Text style={styles.inputModalCancelText}>Cancelar</Text>
+                <Text style={[styles.inputModalCancelText, { color: theme.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.inputModalSave}
+                style={[styles.inputModalSave, { backgroundColor: theme.primary }]}
                 onPress={handleSavePassword}
               >
                 <Text style={styles.inputModalSaveText}>Actualizar</Text>
@@ -1607,41 +1742,49 @@ export default function AdminScreen() {
         onRequestClose={() => setShowRoleModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.inputModalContainer}>
-            <Text style={styles.inputModalTitle}>Cambiar Rol</Text>
-            <Text style={styles.inputModalSubtitle}>
+          <View style={[styles.inputModalContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.inputModalTitle, { color: theme.text }]}>Cambiar Rol</Text>
+            <Text style={[styles.inputModalSubtitle, { color: theme.textSecondary }]}>
               Usuario: {selectedUser?.name}
             </Text>
             <View style={styles.roleOptions}>
               <TouchableOpacity
-                style={[styles.roleOption, selectedRole === 'USER' && styles.roleOptionActive]}
-                onPress={() => setSelectedRole('USER')}
+                style={[
+                  styles.roleOption,
+                  { borderColor: theme.border, backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' },
+                  selectedRole === 'user' && [styles.roleOptionActive, { backgroundColor: theme.primary }],
+                ]}
+                onPress={() => setSelectedRole('user')}
               >
-                <Text style={[styles.roleOptionText, selectedRole === 'USER' && styles.roleOptionTextActive]}>
+                <Text style={[styles.roleOptionText, { color: theme.textSecondary }, selectedRole === 'user' && styles.roleOptionTextActive]}>
                   Usuario
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.roleOption, selectedRole === 'ADMIN' && styles.roleOptionActive]}
-                onPress={() => setSelectedRole('ADMIN')}
+                style={[
+                  styles.roleOption,
+                  { borderColor: theme.border, backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' },
+                  selectedRole === 'admin' && [styles.roleOptionActive, { backgroundColor: theme.primary }],
+                ]}
+                onPress={() => setSelectedRole('admin')}
               >
-                <Text style={[styles.roleOptionText, selectedRole === 'ADMIN' && styles.roleOptionTextActive]}>
+                <Text style={[styles.roleOptionText, { color: theme.textSecondary }, selectedRole === 'admin' && styles.roleOptionTextActive]}>
                   Administrador
                 </Text>
               </TouchableOpacity>
             </View>
             <View style={styles.inputModalButtons}>
               <TouchableOpacity
-                style={styles.inputModalCancel}
+                style={[styles.inputModalCancel, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }]}
                 onPress={() => {
                   setShowRoleModal(false);
                   setSelectedUser(null);
                 }}
               >
-                <Text style={styles.inputModalCancelText}>Cancelar</Text>
+                <Text style={[styles.inputModalCancelText, { color: theme.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.inputModalSave}
+                style={[styles.inputModalSave, { backgroundColor: theme.primary }]}
                 onPress={handleSaveRole}
               >
                 <Text style={styles.inputModalSaveText}>Actualizar</Text>
@@ -1659,32 +1802,32 @@ export default function AdminScreen() {
         onRequestClose={() => setShowLevelModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.inputModalContainer}>
-            <Text style={styles.inputModalTitle}>Cambiar Nivel Financiero</Text>
-            <Text style={styles.inputModalSubtitle}>
+          <View style={[styles.inputModalContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.inputModalTitle, { color: theme.text }]}>Cambiar Nivel Financiero</Text>
+            <Text style={[styles.inputModalSubtitle, { color: theme.textSecondary }]}>
               Usuario: {selectedUser?.name}
             </Text>
             <TextInput
-              style={styles.inputModalInput}
+              style={[styles.inputModalInput, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F9FAFB', borderColor: theme.border, color: theme.text }]}
               placeholder="Nivel (ej: 1, 2, 3...)"
               keyboardType="numeric"
               value={newLevel}
               onChangeText={setNewLevel}
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.textSecondary}
             />
             <View style={styles.inputModalButtons}>
               <TouchableOpacity
-                style={styles.inputModalCancel}
+                style={[styles.inputModalCancel, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#F3F4F6' }]}
                 onPress={() => {
                   setShowLevelModal(false);
                   setNewLevel('');
                   setSelectedUser(null);
                 }}
               >
-                <Text style={styles.inputModalCancelText}>Cancelar</Text>
+                <Text style={[styles.inputModalCancelText, { color: theme.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.inputModalSave}
+                style={[styles.inputModalSave, { backgroundColor: theme.primary }]}
                 onPress={handleSaveLevel}
               >
                 <Text style={styles.inputModalSaveText}>Actualizar</Text>
