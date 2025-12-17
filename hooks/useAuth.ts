@@ -41,19 +41,37 @@ export function useAuth() {
 
   useEffect(() => {
     // Obtener sesión actual
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setSupabaseUser(session.user);
-        syncUser(session.user);
-      } else {
-        setLoading(false);
+    let mounted = true;
+
+    const initAuth = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!mounted) return;
+
+        if (session?.user) {
+          setSupabaseUser(session.user);
+          await syncUser(session.user);
+        } else {
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Auth error:', error);
+        if (mounted) {
+          setLoading(false);
+        }
       }
-    });
+    };
+
+    void initAuth();
 
     // Escuchar cambios de autenticación
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
       // Verificar si es un flujo de recuperación de contraseña
       const isPasswordRecoveryFlow = 
         (event === 'SIGNED_IN' && session?.user?.app_metadata?.provider === 'email') ||
@@ -91,6 +109,7 @@ export function useAuth() {
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []); // No dependencies needed as we're using functional updates

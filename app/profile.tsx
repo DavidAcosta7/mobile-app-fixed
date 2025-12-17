@@ -21,7 +21,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useTheme } from '../contexts/ThemeContext';
-import * as FileSystem from 'expo-file-system';
 
 export default function ProfileScreen() {
   const { user } = useAuth();
@@ -34,7 +33,7 @@ export default function ProfileScreen() {
   const [financialLevel, setFinancialLevel] = useState(0);
   const [experiencePoints, setExperiencePoints] = useState(0);
   const [currentStreak, setCurrentStreak] = useState(0);
-  const [photoUrl, setPhotoUrl] = useState<string>('');
+  const [avatarUrl, setAvatarUrl] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -86,7 +85,7 @@ export default function ProfileScreen() {
         setFinancialLevel(typeof data.financial_level === 'number' ? data.financial_level : 0);
         setExperiencePoints(typeof data.experience_points === 'number' ? data.experience_points : 0);
         setCurrentStreak(typeof data.current_streak === 'number' ? data.current_streak : 0);
-        setPhotoUrl(data.photo_url || '');
+        setAvatarUrl(data.avatar_url || '');
       }
     } catch (error) {
       console.error('Error loading user:', error);
@@ -148,6 +147,7 @@ export default function ProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
+      base64: true,
     });
 
     if (!result.canceled && result.assets[0]) {
@@ -156,16 +156,18 @@ export default function ProfileScreen() {
         setLoading(true);
 
         const asset = result.assets[0];
-        const uri = asset.uri;
+        const base64 = asset.base64;
         const ext = (asset.fileName?.split('.').pop() || 'jpg').toLowerCase();
         const contentType = asset.mimeType || (ext === 'png' ? 'image/png' : 'image/jpeg');
 
+        if (!base64) {
+          Alert.alert('Error', 'No se pudo obtener la imagen en formato base64');
+          return;
+        }
+
         const filePath = `${user.id}/${Date.now()}.${ext === 'png' ? 'png' : 'jpg'}`;
 
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: 'base64' as any,
-        });
-
+        // Convert base64 to binary
         const binaryString = global.atob ? global.atob(base64) : atob(base64);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
@@ -200,7 +202,7 @@ export default function ProfileScreen() {
 
         const { error: updateErr } = await supabase
           .from('users')
-          .update({ photo_url: publicUrl, updated_at: new Date().toISOString() })
+          .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
           .eq('id', user.id);
 
         if (updateErr) {
@@ -209,7 +211,7 @@ export default function ProfileScreen() {
           return;
         }
 
-        setPhotoUrl(publicUrl);
+        setAvatarUrl(publicUrl);
         Alert.alert('Éxito', 'Tu foto de perfil fue actualizada');
       } catch (e) {
         console.error('Error uploading profile photo:', e);
@@ -294,9 +296,9 @@ export default function ProfileScreen() {
               style={[styles.avatarLarge, { backgroundColor: theme.primary }]}
               onPress={pickImage}
             >
-              {photoUrl ? (
+              {avatarUrl ? (
                 <Image
-                  source={{ uri: photoUrl }}
+                  source={{ uri: avatarUrl }}
                   style={styles.avatarImage}
                   contentFit="cover"
                 />

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, Alert, Modal, TextInput, TouchableOpacity, ActivityIndicator, Linking, Platform } from 'react-native';
-import * as IntentLauncher from 'expo-intent-launcher';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
@@ -15,7 +14,8 @@ import { Picker } from '@react-native-picker/picker';
 import { format } from 'date-fns';
 import { achievementService, Achievement } from '../services/achievements.service';
 import { useTheme } from '../contexts/ThemeContext';
-import { pushNotificationsService } from '../services/pushNotifications.service';
+import { NotificationService } from '../services/notifications.service';
+import { useAppPicker } from '../hooks/useAppPicker';
 
 // Helper function to map emojis or icon names to valid Ionicons names
 const getIconName = (icon: string | null | undefined): keyof typeof Ionicons.glyphMap => {
@@ -64,7 +64,8 @@ const getIconName = (icon: string | null | undefined): keyof typeof Ionicons.gly
 export default function DashboardScreen() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
-  const { theme } = useTheme();
+  const { theme: colors, resolvedMode } = useTheme();
+  const { pickApp, openApp } = useAppPicker();
   const [activeTab, setActiveTab] = useState('Todos');
   const [showModal, setShowModal] = useState(false);
   const [payments, setPayments] = useState<any[]>([]);
@@ -84,6 +85,7 @@ export default function DashboardScreen() {
   const [editingPayment, setEditingPayment] = useState<any>(null);
   const [paymentUrl, setPaymentUrl] = useState('');
   const [deepLink, setDeepLink] = useState('');
+  const [selectedAppName, setSelectedAppName] = useState('');
 
   const [promptVisible, setPromptVisible] = useState(false);
   const [promptTitle, setPromptTitle] = useState('');
@@ -223,9 +225,9 @@ export default function DashboardScreen() {
 
       const parsedDateIso = toLocalNoonIso(dueDateDate);
 
-      const preferences = await pushNotificationsService.getOrCreateSettings(user.id);
-      if (preferences.enabled) {
-        await pushNotificationsService.requestPermissions();
+      const preferences = await NotificationService.getPreferences(user.id);
+      if (preferences.notifications_enabled) {
+        await NotificationService.requestPermissions();
       }
 
       if (editingPayment) {
@@ -249,13 +251,14 @@ export default function DashboardScreen() {
 
         if (error) throw error;
 
-        if (preferences.enabled) {
-          await pushNotificationsService.schedulePaymentNotifications(
+        if (preferences.notifications_enabled) {
+          await NotificationService.schedulePaymentNotifications(
             updatedPayment ?? editingPayment,
+            user.id,
             preferences
           );
         } else {
-          await pushNotificationsService.cancelPaymentNotifications(editingPayment.id);
+          await NotificationService.cancelPaymentNotifications(editingPayment.id);
         }
         Alert.alert('Éxito', 'Pago actualizado correctamente');
       } else {
@@ -282,8 +285,8 @@ export default function DashboardScreen() {
 
         if (error) throw error;
 
-        if (insertedPayment && preferences.enabled) {
-          await pushNotificationsService.schedulePaymentNotifications(insertedPayment, preferences);
+        if (insertedPayment && preferences.notifications_enabled) {
+          await NotificationService.schedulePaymentNotifications(insertedPayment, user.id, preferences);
         }
         
         // Si es el primer pago y es primer login, actualizar first_login y redirigir
@@ -302,6 +305,7 @@ export default function DashboardScreen() {
           setCategory('');
           setPaymentUrl('');
           setDeepLink('');
+          setSelectedAppName('');
           
           Alert.alert(
             '¡Excelente!',
@@ -333,17 +337,18 @@ export default function DashboardScreen() {
       setCategory('');
       setPaymentUrl('');
       setDeepLink('');
+      setSelectedAppName('');
       setEditingPayment(null);
       
       // Recargar pagos y reprogramar notificaciones
       await loadPayments();
 
       try {
-        const refreshedPreferences = await pushNotificationsService.getOrCreateSettings(user.id);
-        if (refreshedPreferences.enabled) {
-          await pushNotificationsService.requestPermissions();
+        const refreshedPreferences = await NotificationService.getPreferences(user.id);
+        if (refreshedPreferences.notifications_enabled) {
+          await NotificationService.requestPermissions();
         }
-        await pushNotificationsService.rescheduleAllUserPayments(user.id, refreshedPreferences);
+        await NotificationService.rescheduleAllUserPayments(user.id, refreshedPreferences);
       } catch (e) {
         console.error('Error rescheduling notifications after saving payment:', e);
       }
@@ -363,6 +368,12 @@ export default function DashboardScreen() {
     setCategory(payment.category);
     setPaymentUrl(payment.payment_url || '');
     setDeepLink(payment.deep_link || '');
+    if (payment.deep_link) {
+      const parts = String(payment.deep_link).split('.');
+      setSelectedAppName(parts[parts.length - 1] || String(payment.deep_link));
+    } else {
+      setSelectedAppName('');
+    }
     const date = new Date(payment.due_date);
     const localDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
     setDueDateDate(localDay);
@@ -380,14 +391,14 @@ export default function DashboardScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              await NotificationService.cancelPaymentNotifications(payment.id);
+
               const { error } = await supabase
                 .from('payments')
                 .delete()
                 .eq('id', payment.id);
 
               if (error) throw error;
-
-              await pushNotificationsService.cancelPaymentNotifications(payment.id);
 
               Alert.alert('Éxito', 'Pago eliminado');
               loadPayments();
@@ -402,46 +413,22 @@ export default function DashboardScreen() {
 
   const handlePayment = async (payment: any) => {
     try {
-      // Si tiene app configurada (packageName)
       if (payment.deep_link) {
-        const packageName = payment.deep_link;
-
-        if (Platform.OS === 'android') {
-          try {
-            await IntentLauncher.openApplication(packageName);
-            return;
-          } catch {
-            Alert.alert(
-              'App no instalada',
-              'La aplicación no está instalada en tu teléfono. ¿Deseas usar el link web?',
-              [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                  text: 'Abrir Web',
-                  onPress: () => {
-                    if (payment.payment_url) {
-                      void Linking.openURL(payment.payment_url);
-                    } else {
-                      Alert.alert('Error', 'No hay link web configurado');
-                    }
-                  },
-                },
-              ]
-            );
-            return;
-          }
+        const success = await openApp(payment.deep_link);
+        if (!success && payment.payment_url) {
+          Alert.alert('App no disponible', '¿Deseas abrir el link web alternativo?', [
+            { text: 'Cancelar', style: 'cancel' },
+            {
+              text: 'Abrir Web',
+              onPress: () => {
+                void Linking.openURL(payment.payment_url);
+              },
+            },
+          ]);
         }
-
-        // iOS: intentamos abrir como URL (si el usuario configuró un scheme).
-        try {
-          await Linking.openURL(packageName);
-          return;
-        } catch {
-          // fallthrough
-        }
+        return;
       }
 
-      // Si tiene URL web
       if (payment.payment_url) {
         const canOpen = await Linking.canOpenURL(payment.payment_url);
         if (canOpen) {
@@ -452,13 +439,10 @@ export default function DashboardScreen() {
         return;
       }
 
-      Alert.alert(
-        'Sin configurar',
-        'Edita este pago para configurar un método de pago (app o link web)'
-      );
+      Alert.alert('Sin configurar', 'Edita este pago para configurar un método de pago');
     } catch (error) {
+      console.error('Payment error:', error);
       Alert.alert('Error', 'No se pudo abrir el método de pago');
-      console.error('Error opening payment:', error);
     }
   };
 
@@ -482,7 +466,7 @@ export default function DashboardScreen() {
   const previewAchievements = achievements.slice(0, 4);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }] }>
+    <View style={[styles.container, { backgroundColor: colors.background }] }>
       <Header />
 
       <Modal
@@ -492,28 +476,28 @@ export default function DashboardScreen() {
         onRequestClose={() => setPromptVisible(false)}
       >
         <View style={styles.promptOverlay}>
-          <View style={styles.promptContainer}>
-            <Text style={styles.promptTitle}>{promptTitle}</Text>
-            <Text style={styles.promptMessage}>{promptMessage}</Text>
+          <View style={[styles.promptContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.promptTitle, { color: colors.text }]}>{promptTitle}</Text>
+            <Text style={[styles.promptMessage, { color: colors.textSecondary }]}>{promptMessage}</Text>
             <TextInput
-              style={styles.promptInput}
+              style={[styles.promptInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
               value={promptValue}
               onChangeText={setPromptValue}
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.textSecondary}
               autoCapitalize="none"
             />
             <View style={styles.promptButtons}>
               <TouchableOpacity
-                style={styles.promptCancelButton}
+                style={[styles.promptCancelButton, { backgroundColor: resolvedMode === 'dark' ? colors.border : colors.card, borderColor: colors.border }]}
                 onPress={() => {
                   setPromptVisible(false);
                   setPromptOnSave(null);
                 }}
               >
-                <Text style={styles.promptCancelText}>Cancelar</Text>
+                <Text style={[styles.promptCancelText, { color: colors.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.promptSaveButton}
+                style={[styles.promptSaveButton, { backgroundColor: colors.primary }]}
                 onPress={() => {
                   const value = (promptValue || '').trim();
                   if (value && promptOnSave) {
@@ -533,8 +517,8 @@ export default function DashboardScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={[styles.title, { color: theme.text }]}>FLUXPAY</Text>
-          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+          <Text style={[styles.title, { color: colors.text }]}>FLUXPAY</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             Bienvenido, {user?.name || 'Administrador'}
           </Text>
         </View>
@@ -555,9 +539,9 @@ export default function DashboardScreen() {
         {/* Mis Pagos Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Mis Pagos</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Mis Pagos</Text>
             <TouchableOpacity 
-              style={styles.addButton}
+              style={[styles.addButton, { backgroundColor: colors.primary }]}
               onPress={() => setShowModal(true)}
               activeOpacity={0.8}
             >
@@ -574,11 +558,11 @@ export default function DashboardScreen() {
           {/* Lista de Pagos */}
           {loading && payments.length === 0 ? (
             <Card>
-              <ActivityIndicator size="large" color="#2563EB" style={{ paddingVertical: 24 }} />
+              <ActivityIndicator size="large" color={colors.primary} style={{ paddingVertical: 24 }} />
             </Card>
           ) : filteredPayments.length === 0 ? (
             <Card>
-              <Text style={styles.emptyText}>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
                 Agrega tu primer pago para comenzar
               </Text>
             </Card>
@@ -590,31 +574,31 @@ export default function DashboardScreen() {
                     <Ionicons 
                       name={getIconName(payment.icon)} 
                       size={24} 
-                      color="#2563EB" 
+                      color={colors.primary} 
                       style={styles.paymentIcon}
                     />
                     <View style={styles.paymentInfo}>
-                      <Text style={styles.paymentName}>{payment.name}</Text>
-                      <Text style={styles.paymentCategory}>{payment.category}</Text>
+                      <Text style={[styles.paymentName, { color: colors.text }]}>{payment.name}</Text>
+                      <Text style={[styles.paymentCategory, { color: colors.textSecondary }]}>{payment.category}</Text>
                     </View>
-                    <Text style={styles.paymentAmount}>
+                    <Text style={[styles.paymentAmount, { color: colors.text }]}>
                       ${payment.amount.toFixed(2)}
                     </Text>
                   </View>
                   <View style={styles.paymentFooter}>
-                    <Text style={styles.paymentDate}>
+                    <Text style={[styles.paymentDate, { color: colors.textSecondary }]}>
                       Vence: {new Date(payment.due_date).toLocaleDateString()}
                     </Text>
                     <View style={styles.paymentActions}>
                       <TouchableOpacity 
-                        style={styles.paymentActionButton}
+                        style={[styles.paymentActionButton, { borderColor: colors.border, backgroundColor: colors.card }]}
                         onPress={() => handleEditPayment(payment)}
                       >
-                        <Ionicons name="create-outline" size={18} color="#2563EB" style={{ marginRight: 4 }} />
-                        <Text style={styles.paymentActionText}>Editar</Text>
+                        <Ionicons name="create-outline" size={18} color={colors.primary} style={{ marginRight: 4 }} />
+                        <Text style={[styles.paymentActionText, { color: colors.primary }]}>Editar</Text>
                       </TouchableOpacity>
                       <TouchableOpacity 
-                        style={[styles.paymentActionButton, styles.deleteButton]}
+                        style={[styles.paymentActionButton, styles.deleteButton, { borderColor: colors.border, backgroundColor: colors.card }]}
                         onPress={() => handleDeletePayment(payment)}
                       >
                         <Ionicons name="trash-outline" size={18} color="#EF4444" />
@@ -622,7 +606,7 @@ export default function DashboardScreen() {
                     </View>
                   </View>
                   <TouchableOpacity 
-                    style={styles.payButton}
+                    style={[styles.payButton, { backgroundColor: colors.primary }]}
                     onPress={() => handlePayment(payment)}
                   >
                     <Text style={styles.payButtonText}> Pagar</Text>
@@ -635,14 +619,14 @@ export default function DashboardScreen() {
 
         {/* Progreso Mensual */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Progreso Mensual</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Progreso Mensual</Text>
           <Card>
             <View style={styles.progressHeader}>
-              <Text style={styles.progressText}>0 de 0 pagos completados</Text>
-              <Text style={styles.progressPercent}>0%</Text>
+              <Text style={[styles.progressText, { color: colors.textSecondary }]}>0 de 0 pagos completados</Text>
+              <Text style={[styles.progressPercent, { color: colors.primary }]}>0%</Text>
             </View>
-            <View style={styles.progressBarContainer}>
-              <View style={[styles.progressBar, { width: '0%' }]} />
+            <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
+              <View style={[styles.progressBar, { width: '0%', backgroundColor: colors.primary }]} />
             </View>
           </Card>
         </View>
@@ -650,20 +634,20 @@ export default function DashboardScreen() {
         {/* Tus Logros */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}> Tus Logros</Text>
-            <Text style={styles.achievementCount}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}> Tus Logros</Text>
+            <Text style={[styles.achievementCount, { color: colors.textSecondary }]}>
               {unlockedAchievements}/{totalAchievements}
             </Text>
           </View>
           <View style={styles.achievementGrid}>
             {loadingAchievements ? (
               <Card style={styles.achievementCard}>
-                <ActivityIndicator color="#2563EB" />
+                <ActivityIndicator color={colors.primary} />
               </Card>
             ) : previewAchievements.length === 0 ? (
               <Card style={styles.achievementCard}>
-                <Ionicons name="trophy-outline" size={24} color="#9CA3AF" />
-                <Text style={styles.achievementLabel}>Sin logros</Text>
+                <Ionicons name="trophy-outline" size={24} color={colors.textSecondary} />
+                <Text style={[styles.achievementLabel, { color: colors.textSecondary }]}>Sin logros</Text>
               </Card>
             ) : (
               previewAchievements.map((a) => (
@@ -673,7 +657,7 @@ export default function DashboardScreen() {
                     size={24}
                     color={a.unlocked ? '#10B981' : '#9CA3AF'}
                   />
-                  <Text style={styles.achievementLabel} numberOfLines={2}>
+                  <Text style={[styles.achievementLabel, { color: colors.textSecondary }]} numberOfLines={2}>
                     {a.title}
                   </Text>
                 </Card>
@@ -681,7 +665,7 @@ export default function DashboardScreen() {
             )}
           </View>
           <TouchableOpacity
-            style={[styles.payButton, { backgroundColor: '#2563EB' }]}
+            style={[styles.payButton, { backgroundColor: colors.primary }]}
             onPress={() => router.push('/achievements')}
           >
             <Text style={styles.payButtonText}>Ver todos</Text>
@@ -697,10 +681,10 @@ export default function DashboardScreen() {
         onRequestClose={isFirstLogin ? undefined : () => setShowModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+          <View style={[styles.modalContainer, { backgroundColor: colors.card }]}>
             {/* Header del Modal */}
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {isFirstLogin 
                   ? '¡Bienvenido a FluxPay! 👋' 
                   : editingPayment 
@@ -717,69 +701,70 @@ export default function DashboardScreen() {
                   setCategory('');
                   setPaymentUrl('');
                   setDeepLink('');
+                  setSelectedAppName('');
                 }}>
-                  <Text style={styles.modalClose}>✕</Text>
+                  <Text style={[styles.modalClose, { color: colors.textSecondary }]}>✕</Text>
                 </TouchableOpacity>
               )}
             </View>
             <ScrollView style={styles.modalContent}>
               {isFirstLogin ? (
                 <View style={styles.welcomeContainer}>
-                  <Text style={styles.welcomeText}>
+                  <Text style={[styles.welcomeText, { color: colors.textSecondary }] }>
                     Para comenzar, registra tu primer pago. Te ayudaremos a gestionar todos tus pagos y recibirás recordatorios para que nunca olvides realizar tus pagos a tiempo.
                   </Text>
                 </View>
               ) : (
-                <Text style={styles.modalSubtitle}>
+                <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
                   Completa la información del pago mensual
                 </Text>
               )}
 
               {/* Nombre del pago */}
-              <Text style={styles.inputLabel}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
                 Nombre del pago <Text style={styles.required}>*</Text>
               </Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, backgroundColor: colors.card, color: colors.text }]}
                 placeholder="ej: Netflix, Luz, Internet"
                 value={paymentName}
                 onChangeText={setPaymentName}
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.textSecondary}
               />
 
               {/* Monto */}
-              <Text style={styles.inputLabel}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
                 Monto <Text style={styles.required}>*</Text>
               </Text>
               <View style={styles.amountRow}>
                 <TextInput
-                  style={[styles.input, styles.amountInput]}
+                  style={[styles.input, styles.amountInput, { borderColor: colors.border, backgroundColor: colors.card, color: colors.text }]}
                   placeholder="0.00"
                   keyboardType="numeric"
                   value={amount}
                   onChangeText={setAmount}
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textSecondary}
                 />
                 <TouchableOpacity 
-                  style={styles.currencyContainer}
+                  style={[styles.currencyContainer, { borderColor: colors.border, backgroundColor: colors.card }]}
                   onPress={() => {
                     setCurrency(currency === 'COP' ? 'USD' : currency === 'USD' ? 'EUR' : 'COP');
                   }}
                 >
-                  <Text style={styles.currencyText}>$ {currency}</Text>
+                  <Text style={[styles.currencyText, { color: colors.text }]}>$ {currency}</Text>
                 </TouchableOpacity>
               </View>
 
               {/* Fecha de vencimiento */}
-              <Text style={styles.inputLabel}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
                 Fecha de vencimiento <Text style={styles.required}>*</Text>
               </Text>
               <TouchableOpacity
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, backgroundColor: colors.card }]}
                 onPress={() => setShowDueDatePicker(true)}
                 activeOpacity={0.8}
               >
-                <Text style={styles.dateInputText}>
+                <Text style={[styles.dateInputText, { color: colors.text }]}>
                   {dueDateDate ? format(dueDateDate, 'dd/MM/yyyy') : 'Selecciona una fecha'}
                 </Text>
               </TouchableOpacity>
@@ -798,15 +783,16 @@ export default function DashboardScreen() {
                   }}
                 />
               )}
-              <Text style={styles.inputHint}>
+              <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
                 ℹ️ La fecha se ajustará automáticamente al último día del mes
               </Text>
 
               {/* Categoría */}
-              <Text style={styles.inputLabel}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
                 Categoría <Text style={styles.required}>*</Text>
               </Text>
-              <View style={styles.pickerContainer}>
+              <View style={[styles.pickerContainer, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
                 <Picker
                   selectedValue={category}
                   onValueChange={(v: string) => setCategory(v)}
@@ -821,13 +807,12 @@ export default function DashboardScreen() {
                 </Picker>
               </View>
 
-              {/* Configurar Enlace de Pago */}
               {/* Configurar Método de Pago */}
               <Text style={styles.sectionHeaderText}>💳 Método de pago</Text>
 
               {/* Opción 1: Link Web */}
               <TouchableOpacity 
-                style={styles.paymentMethodButton}
+                style={[styles.paymentMethodButton, { backgroundColor: colors.card, borderColor: colors.border }]}
                 onPress={() => {
                   promptText(
                     'Link de Pago Web',
@@ -842,8 +827,8 @@ export default function DashboardScreen() {
               >
                 <Text style={styles.paymentMethodIcon}>🌐</Text>
                 <View style={styles.paymentMethodInfo}>
-                  <Text style={styles.paymentMethodTitle}>Link Web (URL)</Text>
-                  <Text style={styles.paymentMethodDesc}>
+                  <Text style={[styles.paymentMethodTitle, { color: colors.text }]}>Link Web (URL)</Text>
+                  <Text style={[styles.paymentMethodDesc, { color: colors.textSecondary }]}>
                     {paymentUrl || 'No configurado'}
                   </Text>
                 </View>
@@ -856,68 +841,43 @@ export default function DashboardScreen() {
 
               {/* Opción 2: Seleccionar App */}
               <TouchableOpacity 
-                style={styles.paymentMethodButton}
-                onPress={() => {
-                  Alert.alert(
-                    'Seleccionar Aplicación',
-                    'Elige qué aplicación abrir al presionar "Pagar"',
-                    [
-                      {
-                        text: 'Bancolombia',
-                        onPress: () => {
-                          setDeepLink('com.todo1.mobile');
-                          setPaymentUrl('');
-                        }
-                      },
-                      {
-                        text: 'Nequi',
-                        onPress: () => {
-                          setDeepLink('com.nequi.MobileApp');
-                          setPaymentUrl('');
-                        }
-                      },
-                      {
-                        text: 'Daviplata',
-                        onPress: () => {
-                          setDeepLink('com.daviplata.mobile');
-                          setPaymentUrl('');
-                        }
-                      },
-                      {
-                        text: 'PSE',
-                        onPress: () => {
-                          setDeepLink('co.com.pse.mobile');
-                          setPaymentUrl('');
-                        }
-                      },
-                      {
-                        text: 'Otra app',
-                        onPress: () => {
-                          promptText(
-                            'Nombre del Paquete',
-                            'Ingresa el nombre del paquete de la app (ej: com.banco.app)',
-                            deepLink,
-                            (pkg) => {
-                              setDeepLink(pkg);
-                              setPaymentUrl('');
-                            }
-                          );
-                        }
-                      },
-                      { text: 'Cancelar', style: 'cancel' }
-                    ]
-                  );
+                style={[
+                  styles.paymentMethodButton,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: deepLink ? colors.primary : colors.border,
+                    borderWidth: 2,
+                  },
+                ]}
+                onPress={async () => {
+                  const app = await pickApp({
+                    initialPackageName: deepLink,
+                    promptPackageName: (title, message, initialValue, onSave) => {
+                      promptText(title, message, initialValue, onSave);
+                    },
+                  });
+
+                  if (app) {
+                    setDeepLink(app.packageName);
+                    setSelectedAppName(app.appName);
+                    setPaymentUrl('');
+                  }
                 }}
               >
                 <Text style={styles.paymentMethodIcon}>📱</Text>
                 <View style={styles.paymentMethodInfo}>
-                  <Text style={styles.paymentMethodTitle}>Aplicación del Teléfono</Text>
-                  <Text style={styles.paymentMethodDesc}>
-                    {deepLink || 'No configurado'}
+                  <Text style={[styles.paymentMethodTitle, { color: colors.text }]}>Aplicación del Teléfono</Text>
+                  <Text style={[styles.paymentMethodDesc, { color: colors.textSecondary }]}>
+                    {selectedAppName || deepLink || 'Toca para seleccionar una app'}
                   </Text>
                 </View>
                 {deepLink && (
-                  <TouchableOpacity onPress={() => setDeepLink('')}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setDeepLink('');
+                      setSelectedAppName('');
+                    }}
+                  >
                     <Text style={styles.clearIcon}>✕</Text>
                   </TouchableOpacity>
                 )}
@@ -927,7 +887,7 @@ export default function DashboardScreen() {
               <View style={styles.modalButtons}>
                 {!isFirstLogin && (
                   <TouchableOpacity
-                    style={styles.cancelButton}
+                    style={[styles.cancelButton, { backgroundColor: resolvedMode === 'dark' ? colors.border : colors.card, borderColor: colors.border }]}
                     onPress={() => {
                       setShowModal(false);
                       setEditingPayment(null);
@@ -937,9 +897,10 @@ export default function DashboardScreen() {
                       setCategory('');
                       setPaymentUrl('');
                       setDeepLink('');
+                      setSelectedAppName('');
                     }}
                   >
-                    <Text style={styles.cancelButtonText}>Cancelar</Text>
+                    <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancelar</Text>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity
@@ -947,6 +908,7 @@ export default function DashboardScreen() {
                     styles.saveButton, 
                     loading && styles.saveButtonDisabled,
                     isFirstLogin && styles.saveButtonFullWidth
+                    , { backgroundColor: colors.primary }
                   ]}
                   onPress={handleSavePayment}
                   disabled={loading}
@@ -971,7 +933,6 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
   },
   scrollContent: {
     padding: 16,
@@ -982,12 +943,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#111827',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: '#6B7280',
   },
   statsGrid: {
     flexDirection: 'row',
@@ -1007,10 +966,8 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#111827',
   },
   addButton: {
-    backgroundColor: '#2563EB',
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -1022,7 +979,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: '#6B7280',
     fontSize: 14,
     paddingVertical: 24,
   },
@@ -1033,26 +989,21 @@ const styles = StyleSheet.create({
   },
   progressText: {
     fontSize: 14,
-    color: '#6B7280',
   },
   progressPercent: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#2563EB',
   },
   progressBarContainer: {
     height: 8,
-    backgroundColor: '#E5E7EB',
     borderRadius: 4,
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
-    backgroundColor: '#2563EB',
   },
   achievementCount: {
     fontSize: 14,
-    color: '#6B7280',
   },
   achievementGrid: {
     flexDirection: 'row',
@@ -1071,7 +1022,6 @@ const styles = StyleSheet.create({
   },
   achievementLabel: {
     fontSize: 10,
-    color: '#6B7280',
     textAlign: 'center',
   },
   modalOverlay: {
@@ -1080,7 +1030,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '90%',
@@ -1096,16 +1045,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
   },
   modalTitle: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#111827',
   },
   modalClose: {
     fontSize: 28,
-    color: '#9CA3AF',
     fontWeight: '300',
   },
   modalContent: {
@@ -1113,13 +1059,11 @@ const styles = StyleSheet.create({
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#6B7280',
     marginBottom: 20,
   },
   inputLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
     marginBottom: 8,
   },
   required: {
@@ -1127,28 +1071,21 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
     borderRadius: 12,
     padding: 14,
     fontSize: 16,
-    color: '#111827',
     marginBottom: 16,
-    backgroundColor: '#FFFFFF',
   },
   dateInputText: {
     fontSize: 16,
-    color: '#111827',
   },
   pickerContainer: {
-    backgroundColor: '#F9FAFB',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 16,
   },
   placeholder: {
-    color: '#9CA3AF',
   },
   amountRow: {
     flexDirection: 'row',
@@ -1161,21 +1098,17 @@ const styles = StyleSheet.create({
   },
   currencyContainer: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
     borderRadius: 12,
     padding: 14,
     justifyContent: 'center',
-    backgroundColor: '#F9FAFB',
     minWidth: 100,
   },
   currencyText: {
     fontSize: 16,
-    color: '#111827',
     textAlign: 'center',
   },
   inputHint: {
     fontSize: 12,
-    color: '#6B7280',
     marginTop: -12,
     marginBottom: 16,
   },
@@ -1187,7 +1120,6 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -1195,11 +1127,9 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#374151',
   },
   saveButton: {
     flex: 1,
-    backgroundColor: '#2563EB',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -1217,16 +1147,13 @@ const styles = StyleSheet.create({
     marginLeft: 0,
   },
   welcomeContainer: {
-    backgroundColor: '#EFF6FF',
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
     borderLeftWidth: 4,
-    borderLeftColor: '#2563EB',
   },
   welcomeText: {
     fontSize: 15,
-    color: '#1E40AF',
     lineHeight: 22,
   },
   paymentCard: {
@@ -1247,25 +1174,20 @@ const styles = StyleSheet.create({
   paymentName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#111827',
     marginBottom: 4,
   },
   paymentCategory: {
     fontSize: 12,
-    color: '#6B7280',
     textTransform: 'uppercase',
   },
   paymentAmount: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#2563EB',
   },
   paymentMethodButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -1280,12 +1202,10 @@ const styles = StyleSheet.create({
   paymentMethodTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
     marginBottom: 4,
   },
   paymentMethodDesc: {
     fontSize: 13,
-    color: '#6B7280',
   },
   clearIcon: {
     fontSize: 24,
@@ -1298,11 +1218,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
   },
   paymentDate: {
     fontSize: 12,
-    color: '#6B7280',
   },
   paymentActions: {
     flexDirection: 'row',
@@ -1311,7 +1229,6 @@ const styles = StyleSheet.create({
   paymentActionButton: {
     paddingVertical: 6,
     paddingHorizontal: 12,
-    backgroundColor: '#F3F4F6',
     borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',

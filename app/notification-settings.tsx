@@ -5,26 +5,26 @@ import { Header } from '../components/Header';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { Picker } from '@react-native-picker/picker';
-import { pushNotificationsService } from '../services/pushNotifications.service';
+import { NotificationService } from '../services/notifications.service';
 import { useTheme } from '../contexts/ThemeContext';
 
 type NotificationSettingsRow = {
   user_id: string;
-  enabled: boolean;
-  three_days_before: boolean;
-  two_days_before: boolean;
-  one_day_before: boolean;
-  same_day: boolean;
-  same_day_interval_minutes?: number;
+  notifications_enabled: boolean;
+  notify_3_days: boolean;
+  notify_2_days: boolean;
+  notify_1_day: boolean;
+  notify_same_day: boolean;
+  same_day_interval?: number;
 };
 
 const DEFAULT_SETTINGS: Omit<NotificationSettingsRow, 'user_id'> = {
-  enabled: true,
-  three_days_before: true,
-  two_days_before: true,
-  one_day_before: true,
-  same_day: true,
-  same_day_interval_minutes: 60,
+  notifications_enabled: false,
+  notify_3_days: true,
+  notify_2_days: true,
+  notify_1_day: true,
+  notify_same_day: true,
+  same_day_interval: 60,
 };
 
 export default function NotificationSettingsScreen() {
@@ -45,7 +45,7 @@ export default function NotificationSettingsScreen() {
       setLoading(true);
 
       const { data, error } = await supabase
-        .from('notification_settings')
+        .from('notification_preferences')
         .select('*')
         .eq('user_id', user.id)
         .single();
@@ -54,7 +54,7 @@ export default function NotificationSettingsScreen() {
         if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
           Alert.alert(
             'No disponible',
-            'La tabla notification_settings no existe en Supabase. Ejecuta la migración notification_settings.sql para habilitar esta sección.'
+            'La tabla notification_preferences no existe en Supabase. Ejecuta el SQL de migración para habilitar esta sección.'
           );
           setSettings({ user_id: user.id, ...DEFAULT_SETTINGS });
           return;
@@ -72,16 +72,16 @@ export default function NotificationSettingsScreen() {
       if (data) {
         setSettings({
           user_id: user.id,
-          enabled: !!data.enabled,
-          three_days_before: !!data.three_days_before,
-          two_days_before: !!data.two_days_before,
-          one_day_before: !!data.one_day_before,
-          same_day: !!data.same_day,
-          same_day_interval_minutes: typeof data.same_day_interval_minutes === 'number' ? data.same_day_interval_minutes : 60,
+          notifications_enabled: !!(data as any).notifications_enabled,
+          notify_3_days: !!(data as any).notify_3_days,
+          notify_2_days: !!(data as any).notify_2_days,
+          notify_1_day: !!(data as any).notify_1_day,
+          notify_same_day: !!(data as any).notify_same_day,
+          same_day_interval: typeof (data as any).same_day_interval === 'number' ? (data as any).same_day_interval : 60,
         });
       }
     } catch (e: any) {
-      console.error('Error loading notification_settings:', e);
+      console.error('Error loading notification_preferences:', e);
       Alert.alert('Error', 'No se pudieron cargar tus configuraciones de notificación');
     } finally {
       setLoading(false);
@@ -94,16 +94,17 @@ export default function NotificationSettingsScreen() {
       setSaving(true);
 
       const { error } = await supabase
-        .from('notification_settings')
+        .from('notification_preferences')
         .upsert(
           {
             user_id: user.id,
-            enabled: next.enabled,
-            three_days_before: next.three_days_before,
-            two_days_before: next.two_days_before,
-            one_day_before: next.one_day_before,
-            same_day: next.same_day,
-            same_day_interval_minutes: next.same_day_interval_minutes ?? 60,
+            notifications_enabled: next.notifications_enabled,
+            notify_3_days: next.notify_3_days,
+            notify_2_days: next.notify_2_days,
+            notify_1_day: next.notify_1_day,
+            notify_same_day: next.notify_same_day,
+            same_day_interval: next.same_day_interval ?? 60,
+            updated_at: new Date().toISOString(),
           },
           { onConflict: 'user_id' }
         );
@@ -112,7 +113,7 @@ export default function NotificationSettingsScreen() {
         if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
           Alert.alert(
             'No disponible',
-            'No se pudo guardar porque la tabla notification_settings no existe en Supabase. Ejecuta la migración notification_settings.sql.'
+            'No se pudo guardar porque la tabla notification_preferences no existe en Supabase. Ejecuta el SQL de migración.'
           );
           return;
         }
@@ -137,19 +138,20 @@ export default function NotificationSettingsScreen() {
     try {
       if (!user?.id) return;
 
-      if (!next.enabled) {
-        await pushNotificationsService.cancelAll();
+      if (!next.notifications_enabled) {
+        await NotificationService.cancelAll();
         return;
       }
 
-      await pushNotificationsService.requestPermissions();
-      await pushNotificationsService.rescheduleAllUserPayments(user.id, {
-        enabled: next.enabled,
-        three_days_before: next.three_days_before,
-        two_days_before: next.two_days_before,
-        one_day_before: next.one_day_before,
-        same_day: next.same_day,
-        same_day_interval_minutes: next.same_day_interval_minutes ?? 60,
+      await NotificationService.requestPermissions();
+      await NotificationService.rescheduleAllUserPayments(user.id, {
+        user_id: user.id,
+        notifications_enabled: next.notifications_enabled,
+        notify_3_days: next.notify_3_days,
+        notify_2_days: next.notify_2_days,
+        notify_1_day: next.notify_1_day,
+        notify_same_day: next.notify_same_day,
+        same_day_interval: next.same_day_interval ?? 60,
       });
     } catch (e) {
       console.error('Error scheduling native notifications:', e);
@@ -191,62 +193,62 @@ export default function NotificationSettingsScreen() {
                 <Text style={[styles.rowSubtitle, { color: theme.textSecondary }]}>Activar o desactivar recordatorios</Text>
               </View>
               <Switch
-                value={settings.enabled}
-                onValueChange={(v) => setSaveAndSchedule({ enabled: v })}
+                value={settings.notifications_enabled}
+                onValueChange={(v) => setSaveAndSchedule({ notifications_enabled: v })}
               />
             </View>
 
             <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-            <View style={[styles.row, !settings.enabled && styles.rowDisabled]}>
+            <View style={[styles.row, !settings.notifications_enabled && styles.rowDisabled]}>
               <View style={styles.rowText}>
                 <Text style={[styles.rowTitle, { color: theme.text }]}>3 días antes</Text>
                 <Text style={[styles.rowSubtitle, { color: theme.textSecondary }]}>Recordatorio anticipado</Text>
               </View>
               <Switch
-                value={settings.three_days_before}
-                disabled={!settings.enabled}
-                onValueChange={(v) => setSaveAndSchedule({ three_days_before: v })}
+                value={settings.notify_3_days}
+                disabled={!settings.notifications_enabled}
+                onValueChange={(v) => setSaveAndSchedule({ notify_3_days: v })}
               />
             </View>
 
-            <View style={[styles.row, !settings.enabled && styles.rowDisabled]}>
+            <View style={[styles.row, !settings.notifications_enabled && styles.rowDisabled]}>
               <View style={styles.rowText}>
                 <Text style={[styles.rowTitle, { color: theme.text }]}>2 días antes</Text>
                 <Text style={[styles.rowSubtitle, { color: theme.textSecondary }]}>Recordatorio anticipado</Text>
               </View>
               <Switch
-                value={settings.two_days_before}
-                disabled={!settings.enabled}
-                onValueChange={(v) => setSaveAndSchedule({ two_days_before: v })}
+                value={settings.notify_2_days}
+                disabled={!settings.notifications_enabled}
+                onValueChange={(v) => setSaveAndSchedule({ notify_2_days: v })}
               />
             </View>
 
-            <View style={[styles.row, !settings.enabled && styles.rowDisabled]}>
+            <View style={[styles.row, !settings.notifications_enabled && styles.rowDisabled]}>
               <View style={styles.rowText}>
                 <Text style={[styles.rowTitle, { color: theme.text }]}>1 día antes</Text>
                 <Text style={[styles.rowSubtitle, { color: theme.textSecondary }]}>Recordatorio anticipado</Text>
               </View>
               <Switch
-                value={settings.one_day_before}
-                disabled={!settings.enabled}
-                onValueChange={(v) => setSaveAndSchedule({ one_day_before: v })}
+                value={settings.notify_1_day}
+                disabled={!settings.notifications_enabled}
+                onValueChange={(v) => setSaveAndSchedule({ notify_1_day: v })}
               />
             </View>
 
-            <View style={[styles.row, !settings.enabled && styles.rowDisabled]}>
+            <View style={[styles.row, !settings.notifications_enabled && styles.rowDisabled]}>
               <View style={styles.rowText}>
                 <Text style={[styles.rowTitle, { color: theme.text }]}>Mismo día</Text>
                 <Text style={[styles.rowSubtitle, { color: theme.textSecondary }]}>Notificar el día de vencimiento</Text>
               </View>
               <Switch
-                value={settings.same_day}
-                disabled={!settings.enabled}
-                onValueChange={(v) => setSaveAndSchedule({ same_day: v })}
+                value={settings.notify_same_day}
+                disabled={!settings.notifications_enabled}
+                onValueChange={(v) => setSaveAndSchedule({ notify_same_day: v })}
               />
             </View>
 
-            {settings.enabled && settings.same_day && (
+            {settings.notifications_enabled && settings.notify_same_day && (
               <View style={[styles.row, styles.rowColumn]}>
                 <View style={styles.rowText}>
                   <Text style={[styles.rowTitle, { color: theme.text }]}>Frecuencia de recordatorios</Text>
@@ -254,8 +256,8 @@ export default function NotificationSettingsScreen() {
                 </View>
                 <View style={[styles.pickerContainer, { borderColor: theme.border, backgroundColor: theme.background }]}>
                   <Picker
-                    selectedValue={settings.same_day_interval_minutes ?? 60}
-                    onValueChange={(v: number) => setSaveAndSchedule({ same_day_interval_minutes: v })}
+                    selectedValue={settings.same_day_interval ?? 60}
+                    onValueChange={(v: number) => setSaveAndSchedule({ same_day_interval: v })}
                   >
                     <Picker.Item label="Cada 15 minutos" value={15} />
                     <Picker.Item label="Cada 30 minutos" value={30} />

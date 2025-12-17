@@ -1,58 +1,67 @@
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { Header } from '../components/Header';
-import { Ionicons } from '@expo/vector-icons';
-import { TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '../hooks/useAuth';
+import { Header } from '../components/Header';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../hooks/useAuth';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { isAdmin } = useAuth();
-  const { theme } = useTheme();
+  const { theme: colors } = useTheme();
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header />
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.titleRow}>
-          <Ionicons name="settings-outline" size={24} color={theme.text} />
-          <Text style={[styles.title, { color: theme.text }]}>Configuraciones</Text>
-        </View>
+        <Text style={[styles.title, { color: colors.text }]}>⚙️ Configuración</Text>
 
         {isAdmin && (
-          <TouchableOpacity
-            style={[styles.adminButton, { backgroundColor: theme.card, borderColor: theme.border }]}
-            onPress={() => router.push('/admin')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="shield-checkmark-outline" size={24} color={theme.text} />
-            <View style={styles.adminButtonTextContainer}>
-              <Text style={[styles.adminButtonTitle, { color: theme.text }]}>Panel de Administración</Text>
-              <Text style={styles.adminButtonSubtitle}>
-                Gestiona usuarios, auditoría y reportes
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-          </TouchableOpacity>
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Administración</Text>
+            <TouchableOpacity
+              style={[styles.menuItem, { borderBottomColor: colors.border }]}
+              onPress={() => router.push('/admin')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.menuIcon}>🛡️</Text>
+              <View style={styles.menuInfo}>
+                <Text style={[styles.menuTitle, { color: colors.text }]}>Panel de Administración</Text>
+                <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>Gestiona usuarios, auditoría y reportes</Text>
+              </View>
+              <Text style={[styles.menuArrow, { color: colors.textSecondary }]}>›</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
-        <TouchableOpacity
-          style={[styles.adminButton, { backgroundColor: theme.card, borderColor: theme.border }]}
-          onPress={() => router.push('/notification-settings')}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="notifications-outline" size={24} color={theme.text} />
-          <View style={styles.adminButtonTextContainer}>
-            <Text style={[styles.adminButtonTitle, { color: theme.text }]}>Preferencias de notificaciones</Text>
-            <Text style={styles.adminButtonSubtitle}>
-              Recordatorios de pagos
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-        </TouchableOpacity>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Notificaciones</Text>
 
-        <Text style={[styles.message, { color: theme.textSecondary }]}>Esta sección estará disponible próximamente.</Text>
+          <TouchableOpacity
+            style={[styles.menuItem, { borderBottomColor: colors.border }]}
+            onPress={() => router.push('/notification-preferences')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.menuIcon}>🔔</Text>
+            <View style={styles.menuInfo}>
+              <Text style={[styles.menuTitle, { color: colors.text }]}>Preferencias de Notificaciones</Text>
+              <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>Configura cuándo recibir recordatorios</Text>
+            </View>
+            <Text style={[styles.menuArrow, { color: colors.textSecondary }]}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.menuItem, { borderBottomColor: colors.border }]}
+            onPress={() => router.push('/notifications-history')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.menuIcon}>📜</Text>
+            <View style={styles.menuInfo}>
+              <Text style={[styles.menuTitle, { color: colors.text }]}>Historial de Notificaciones</Text>
+              <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>Ver todas las notificaciones enviadas</Text>
+            </View>
+            <Text style={[styles.menuArrow, { color: colors.textSecondary }]}>›</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </View>
   );
@@ -61,56 +70,54 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
   },
   content: {
-    padding: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
+    padding: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#111827',
+    marginBottom: 20,
+  },
+  card: {
+    borderRadius: 12,
+    padding: 16,
     marginBottom: 16,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 16,
-  },
-  message: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  adminButton: {
-    width: '100%',
-    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    padding: 14,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
-  adminButtonTextContainer: {
-    flex: 1,
-    marginLeft: 12,
+  menuIcon: {
+    fontSize: 24,
     marginRight: 12,
+    width: 32,
   },
-  adminButtonTitle: {
+  menuInfo: {
+    flex: 1,
+  },
+  menuTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: '600',
+    marginBottom: 2,
   },
-  adminButtonSubtitle: {
+  menuDesc: {
     fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2,
+  },
+  menuArrow: {
+    fontSize: 24,
   },
 });

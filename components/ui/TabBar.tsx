@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface TabBarProps {
   tabs: string[];
@@ -7,17 +8,32 @@ interface TabBarProps {
 }
 
 export function TabBar({ tabs, activeTab, onTabPress }: TabBarProps) {
+  const { theme: colors, resolvedMode } = useTheme();
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.card,
+          shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05,
+        },
+      ]}
+    >
       {tabs.map((tab) => {
         const isActive = activeTab === tab;
         return (
           <TouchableOpacity
             key={tab}
-            style={[styles.tab, isActive && styles.activeTab]}
+            style={[styles.tab, isActive && { backgroundColor: colors.primary }]}
             onPress={() => onTabPress(tab)}
           >
-            <Text style={[styles.tabText, isActive && styles.activeTabText]}>
+            <Text
+              style={[
+                styles.tabText,
+                { color: colors.textSecondary },
+                isActive && styles.activeTabText,
+              ]}
+            >
               {tab}
             </Text>
           </TouchableOpacity>
@@ -30,7 +46,6 @@ export function TabBar({ tabs, activeTab, onTabPress }: TabBarProps) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 4,
     marginBottom: 16,
@@ -46,13 +61,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  activeTab: {
-    backgroundColor: '#2563EB',
-  },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6B7280',
   },
   activeTabText: {
     color: '#FFFFFF',

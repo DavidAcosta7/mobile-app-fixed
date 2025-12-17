@@ -1,5 +1,6 @@
 import { TextInput, View, Text } from 'react-native';
 import { cn } from '../../lib/utils';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface InputProps {
   value: string;
@@ -22,6 +23,7 @@ export function Input({
   className,
   error,
 }: InputProps) {
+  const { theme: colors } = useTheme();
   return (
     <View>
       <TextInput
@@ -36,7 +38,7 @@ export function Input({
           error && 'border-red-500',
           className
         )}
-        placeholderTextColor="#9CA3AF"
+        placeholderTextColor={colors.textSecondary}
       />
       {error && (
         <Text className="text-red-500 text-sm mt-1">{error}</Text>

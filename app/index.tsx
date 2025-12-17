@@ -5,9 +5,11 @@ import { View, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
 import DashboardScreen from './dashboard';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function Index() {
   const { user, supabaseUser, loading } = useAuth();
+  const { theme: colors } = useTheme();
   const router = useRouter();
   const segments = useSegments();
   const pathname = usePathname();
@@ -62,7 +64,7 @@ export default function Index() {
 
   if (loading || checkingRecovery) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Image 
           source={require('../logo.png')}
           style={styles.logo}
@@ -84,7 +86,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
   },
   logo: {
     width: 200,

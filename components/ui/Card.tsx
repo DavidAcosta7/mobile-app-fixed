@@ -6,15 +6,15 @@ interface CardProps extends ViewProps {
 }
 
 export function Card({ children, style, ...props }: CardProps) {
-  const { theme, resolvedMode } = useTheme();
+  const { theme: colors, resolvedMode } = useTheme();
 
   return (
     <View
       style={[
         styles.card,
         {
-          backgroundColor: theme.card,
-          borderColor: theme.border,
+          backgroundColor: colors.card,
+          borderColor: colors.border,
           shadowOpacity: resolvedMode === 'dark' ? 0.25 : 0.1,
         },
         style,
@@ -28,7 +28,6 @@ export function Card({ children, style, ...props }: CardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 16,
     shadowColor: '#000',
@@ -37,6 +36,5 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
     borderWidth: 1,
-    borderColor: 'transparent',
   },
 });

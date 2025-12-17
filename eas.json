@@ -1,21 +1,19 @@
 {
   "cli": {
-    "version": ">= 5.2.0"
+    "version": ">= 5.2.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "preview": {
       "android": {
         "buildType": "apk"
       },
+      "distribution": "internal",
+      "node": "20.18.0",
       "env": {
         "EXPO_NO_CAPABILITY_SYNC": "1"
       },
-      "channel": "preview"
-    },
-    "production": {
-      "android": {
-        "buildType": "app-bundle"
-      }
+      "installCommand": "npm install"
     }
   }
 }

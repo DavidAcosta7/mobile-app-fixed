@@ -1,4 +1,5 @@
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface ButtonProps {
   title: string;
@@ -9,13 +10,14 @@ interface ButtonProps {
 }
 
 export function Button({ title, onPress, variant = 'primary', loading, disabled }: ButtonProps) {
+  const { theme: colors } = useTheme();
   const isPrimary = variant === 'primary';
   
   return (
     <TouchableOpacity
       style={[
         styles.button,
-        isPrimary ? styles.primary : styles.secondary,
+        isPrimary ? { backgroundColor: colors.primary } : { backgroundColor: colors.border },
         disabled && styles.disabled,
       ]}
       onPress={onPress}
@@ -23,9 +25,14 @@ export function Button({ title, onPress, variant = 'primary', loading, disabled 
       activeOpacity={0.8}
     >
       {loading ? (
-        <ActivityIndicator color={isPrimary ? '#FFFFFF' : '#2563EB'} />
+        <ActivityIndicator color={isPrimary ? '#FFFFFF' : colors.primary} />
       ) : (
-        <Text style={[styles.text, isPrimary ? styles.textPrimary : styles.textSecondary]}>
+        <Text
+          style={[
+            styles.text,
+            isPrimary ? styles.textPrimary : { color: colors.text },
+          ]}
+        >
           {title}
         </Text>
       )}
@@ -41,12 +48,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primary: {
-    backgroundColor: '#2563EB',
-  },
-  secondary: {
-    backgroundColor: '#E5E7EB',
-  },
   disabled: {
     opacity: 0.5,
   },
@@ -56,8 +57,5 @@ const styles = StyleSheet.create({
   },
   textPrimary: {
     color: '#FFFFFF',
-  },
-  textSecondary: {
-    color: '#374151',
   },
 });

@@ -6,9 +6,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { achievementService, Achievement } from '../services/achievements.service';
 import { supabase } from '../lib/supabase';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function AchievementsScreen() {
   const { user } = useAuth();
+  const { theme: colors } = useTheme();
   const [achievements, setAchievements] = useState<Achievement[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -70,20 +72,20 @@ export default function AchievementsScreen() {
   }, [user?.id]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.titleContainer}>
-            <Ionicons name="trophy" size={32} color="#2563EB" style={styles.titleIcon} />
-            <Text style={styles.title}>Logros</Text>
+            <Ionicons name="trophy" size={32} color={colors.primary} style={styles.titleIcon} />
+            <Text style={[styles.title, { color: colors.text }]}>Logros</Text>
           </View>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             Desbloquea logros pagando a tiempo
           </Text>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>
+          <View style={[styles.badge, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.badgeText, { color: colors.textSecondary }]}>
               {totals.unlocked}/{totals.total} Logros
             </Text>
           </View>
@@ -94,14 +96,14 @@ export default function AchievementsScreen() {
           {loading ? (
             <Card style={styles.achievementCard}>
               <View style={{ alignItems: 'center', paddingVertical: 10 }}>
-                <ActivityIndicator color="#2563EB" />
+                <ActivityIndicator color={colors.primary} />
               </View>
             </Card>
           ) : achievements.length === 0 ? (
             <Card style={styles.achievementCard}>
               <View style={{ alignItems: 'center', paddingVertical: 10 }}>
-                <Ionicons name="trophy-outline" size={28} color="#9CA3AF" />
-                <Text style={styles.achievementDesc}>Aún no hay logros</Text>
+                <Ionicons name="trophy-outline" size={28} color={colors.textSecondary} />
+                <Text style={[styles.achievementDesc, { color: colors.textSecondary }]}>Aún no hay logros</Text>
               </View>
             </Card>
           ) : (
@@ -111,21 +113,23 @@ export default function AchievementsScreen() {
                   <View
                     style={[
                       styles.iconContainer,
-                      achievement.unlocked ? styles.iconUnlocked : styles.iconLocked,
+                      {
+                        backgroundColor: achievement.unlocked ? '#D1FAE5' : colors.border,
+                      },
                     ]}
                   >
                     <Ionicons
                       name={achievement.unlocked ? 'trophy-outline' : 'lock-closed'}
                       size={28}
-                      color={achievement.unlocked ? '#10B981' : '#9CA3AF'}
+                      color={achievement.unlocked ? '#10B981' : colors.textSecondary}
                     />
                   </View>
                   <View style={styles.achievementInfo}>
-                    <Text style={styles.achievementTitle}>{achievement.title}</Text>
+                    <Text style={[styles.achievementTitle, { color: colors.text }]}>{achievement.title}</Text>
                     <Text
                       style={[
                         styles.achievementStatus,
-                        achievement.unlocked ? styles.statusUnlocked : styles.statusLocked,
+                        { color: achievement.unlocked ? '#10B981' : colors.textSecondary },
                       ]}
                     >
                       {achievement.unlocked ? '¡Desbloqueado!' : 'Bloqueado'}
@@ -134,14 +138,14 @@ export default function AchievementsScreen() {
                   <Text
                     style={[
                       styles.achievementXP,
-                      achievement.unlocked ? styles.xpUnlocked : styles.xpLocked,
+                      { color: achievement.unlocked ? '#10B981' : colors.textSecondary },
                     ]}
                   >
                     +{achievement.points} XP
                   </Text>
                 </View>
 
-                <Text style={styles.achievementDesc}>{achievement.description}</Text>
+                <Text style={[styles.achievementDesc, { color: colors.textSecondary }]}>{achievement.description}</Text>
               </Card>
             ))
           )}
@@ -154,7 +158,6 @@ export default function AchievementsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
   },
   scrollContent: {
     padding: 16,
@@ -173,22 +176,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#111827',
   },
   subtitle: {
     fontSize: 16,
-    color: '#6B7280',
     marginBottom: 12,
   },
   badge: {
-    backgroundColor: '#FEF3C7',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
     alignSelf: 'flex-start',
+    borderWidth: 1,
   },
   badgeText: {
-    color: '#92400E',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -211,44 +211,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
-  iconLocked: {
-    backgroundColor: '#E5E7EB',
-  },
-  iconUnlocked: {
-    backgroundColor: '#D1FAE5',
-  },
   achievementInfo: {
     flex: 1,
   },
   achievementTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#111827',
     marginBottom: 4,
   },
   achievementStatus: {
     fontSize: 14,
     fontWeight: '600',
   },
-  statusLocked: {
-    color: '#6B7280',
-  },
-  statusUnlocked: {
-    color: '#10B981',
-  },
   achievementXP: {
     fontSize: 18,
     fontWeight: 'bold',
   },
-  xpLocked: {
-    color: '#9CA3AF',
-  },
-  xpUnlocked: {
-    color: '#10B981',
-  },
   achievementDesc: {
     fontSize: 14,
-    color: '#6B7280',
     marginBottom: 12,
     lineHeight: 20,
   },
@@ -257,18 +237,15 @@ const styles = StyleSheet.create({
   },
   progressBarBg: {
     height: 8,
-    backgroundColor: '#E5E7EB',
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 6,
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#3B82F6',
   },
   progressText: {
     fontSize: 12,
-    color: '#6B7280',
   },
 });
 

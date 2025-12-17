@@ -29,20 +29,23 @@ export function Header() {
       style={[
         styles.safeArea,
         {
-          paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) + 10 : 10,
           backgroundColor: theme.card,
         },
       ]}
     >
       <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }] }>
         {/* Logo */}
-        <View style={styles.logoContainer}>
+        <TouchableOpacity
+          style={styles.logoContainer}
+          onPress={() => router.push('/')}
+          activeOpacity={0.8}
+        >
           <Image
             source={require('../logo.png')}
             style={styles.logoImage}
             resizeMode="contain"
           />
-        </View>
+        </TouchableOpacity>
 
         {/* Right Actions */}
         <View style={styles.actions}>
@@ -64,7 +67,7 @@ export function Header() {
         <TouchableOpacity 
           style={styles.iconButton}
           onPress={() => {
-            router.push('/notifications');
+            router.push('/notifications-history');
           }}
         >
           <Ionicons name="notifications-outline" size={24} color={theme.text} />
@@ -78,7 +81,7 @@ export function Header() {
             void refreshUser();
           }}
         >
-          <View style={styles.avatar}>
+          <View style={[styles.avatar, { backgroundColor: theme.primary }]}>
             <Text style={styles.avatarText}>
               {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
             </Text>
@@ -116,13 +119,21 @@ export function Header() {
               <TouchableOpacity
                 style={[
                   styles.themeOption,
-                  { borderColor: theme.border, backgroundColor: mode === 'light' ? (resolvedMode === 'dark' ? '#111827' : '#EFF6FF') : 'transparent' },
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      mode === 'light'
+                        ? resolvedMode === 'dark'
+                          ? theme.background
+                          : theme.border
+                        : 'transparent',
+                  },
                 ]}
                 activeOpacity={0.85}
                 onPress={() => setMode('light')}
               >
                 <View style={styles.themeOptionLeft}>
-                  <View style={[styles.themeIconPill, { backgroundColor: '#EFF6FF' }]}>
+                  <View style={[styles.themeIconPill, { backgroundColor: theme.border }]}>
                     <Ionicons name="sunny-outline" size={18} color={theme.primary} />
                   </View>
                   <View>
@@ -140,14 +151,22 @@ export function Header() {
               <TouchableOpacity
                 style={[
                   styles.themeOption,
-                  { borderColor: theme.border, backgroundColor: mode === 'dark' ? (resolvedMode === 'dark' ? '#1F2937' : '#F3F4F6') : 'transparent' },
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      mode === 'dark'
+                        ? resolvedMode === 'dark'
+                          ? theme.card
+                          : theme.border
+                        : 'transparent',
+                  },
                 ]}
                 activeOpacity={0.85}
                 onPress={() => setMode('dark')}
               >
                 <View style={styles.themeOptionLeft}>
-                  <View style={[styles.themeIconPill, { backgroundColor: '#111827' }]}>
-                    <Ionicons name="moon-outline" size={18} color="#F9FAFB" />
+                  <View style={[styles.themeIconPill, { backgroundColor: theme.background }]}>
+                    <Ionicons name="moon-outline" size={18} color={theme.text} />
                   </View>
                   <View>
                     <Text style={[styles.themeOptionTitle, { color: theme.text }]}>Oscuro</Text>
@@ -164,13 +183,21 @@ export function Header() {
               <TouchableOpacity
                 style={[
                   styles.themeOption,
-                  { borderColor: theme.border, backgroundColor: mode === 'system' ? (resolvedMode === 'dark' ? '#1F2937' : '#F3F4F6') : 'transparent' },
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      mode === 'system'
+                        ? resolvedMode === 'dark'
+                          ? theme.card
+                          : theme.border
+                        : 'transparent',
+                  },
                 ]}
                 activeOpacity={0.85}
                 onPress={() => setMode('system')}
               >
                 <View style={styles.themeOptionLeft}>
-                  <View style={[styles.themeIconPill, { backgroundColor: '#F3F4F6' }]}>
+                  <View style={[styles.themeIconPill, { backgroundColor: theme.border }]}>
                     <Ionicons name="phone-portrait-outline" size={18} color={theme.text} />
                   </View>
                   <View>
@@ -204,7 +231,7 @@ export function Header() {
             <View style={[styles.menuContainer, { backgroundColor: theme.card }] }>
               {/* Header del Menu */}
               <View style={[styles.menuHeader, { borderBottomColor: theme.border }] }>
-                <View style={styles.menuAvatar}>
+                <View style={[styles.menuAvatar, { backgroundColor: theme.primary }]}>
                   <Text style={styles.menuAvatarText}>
                     {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
                   </Text>
@@ -261,10 +288,10 @@ export function Header() {
                   style={styles.menuItem}
                   onPress={() => {
                     setShowProfileMenu(false);
-                    router.push('/notifications');
+                    router.push('/notifications-history');
                   }}
                 >
-                  <Ionicons name="notifications-outline" size={24} color={theme.text} />
+                  <Text style={styles.menuItemIcon}>📜</Text>
                   <Text style={[styles.menuItemText, { color: theme.text }]}>Historial de notificaciones</Text>
                 </TouchableOpacity>
 
@@ -288,7 +315,6 @@ export function Header() {
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -296,9 +322,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -373,8 +397,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   logoImage: {
-    width: 120,
-    height: 32,
+    width: 170,
+    height: 44,
   },
   actions: {
     flexDirection: 'row',
@@ -394,7 +418,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -433,7 +456,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
