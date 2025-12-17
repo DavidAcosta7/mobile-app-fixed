@@ -93,7 +93,7 @@ function RootLayoutContent() {
   if (showError) {
     return (
       <View style={styles.errorContainer}>
-        <Text style={styles.errorTitle}>⚠️ Error de Carga</Text>
+        <Text style={styles.errorTitle}>Error de Carga</Text>
         <Text style={styles.errorText}>
           La app tardó demasiado en cargar. Por favor, cierra y abre de nuevo.
         </Text>

@@ -17,10 +17,6 @@ const COLORS = {
 };
 
 const ICON_MAP: Record<string, keyof typeof Ionicons.glyphMap> = {
-  '💳': 'card',
-  '⏱️': 'time',
-  '🔴': 'alert-circle',
-  '💰': 'cash',
   // Mapeo directo de nombres de iconos
   'card': 'card',
   'time': 'time',

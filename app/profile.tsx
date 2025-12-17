@@ -23,7 +23,7 @@ import { Image } from 'expo-image';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function ProfileScreen() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const router = useRouter();
   const { theme, resolvedMode } = useTheme();
   
@@ -38,7 +38,7 @@ export default function ProfileScreen() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
 
-  // ✅ useEffect ANTES del return condicional
+  // useEffect ANTES del return condicional
   useEffect(() => {
     if (user?.id) {
       loadUserData();
@@ -47,7 +47,7 @@ export default function ProfileScreen() {
     }
   }, [user?.id]);
 
-  // ✅ Ahora sí el return condicional
+  // Ahora sí el return condicional
   if (!user) {
     return (
       <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -212,6 +212,7 @@ export default function ProfileScreen() {
         }
 
         setAvatarUrl(publicUrl);
+        await refreshUser();
         Alert.alert('Éxito', 'Tu foto de perfil fue actualizada');
       } catch (e) {
         console.error('Error uploading profile photo:', e);

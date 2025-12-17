@@ -91,7 +91,7 @@ const logAuditAction = async (
       if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
         // Solo mostrar el mensaje una vez para no saturar la consola
         if (!auditTableWarningShown) {
-          console.log('ℹ️  La tabla audit_logs no existe. Ejecuta la migración SQL para habilitar la auditoría completa.');
+          console.log('La tabla audit_logs no existe. Ejecuta la migración SQL para habilitar la auditoría completa.');
           auditTableWarningShown = true;
         }
         return;
@@ -144,10 +144,10 @@ export default function AdminScreen() {
   const { theme, resolvedMode } = useTheme();
   const [activeTab, setActiveTab] = useState('Usuarios');
   const [users, setUsers] = useState<User[]>([]);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [activeUsers, setActiveUsers] = useState(0);
-  const [suspendedUsers, setSuspendedUsers] = useState(0);
-  const [totalPayments, setTotalPayments] = useState(0);
+  const [, setTotalUsers] = useState(0);
+  const [, setActiveUsers] = useState(0);
+  const [, setSuspendedUsers] = useState(0);
+  const [, setTotalPayments] = useState(0);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [reports, setReports] = useState<Reports | null>(null);
   const [loading, setLoading] = useState(true);
@@ -208,9 +208,10 @@ export default function AdminScreen() {
   }, [activeTab]);
 
   const isUserSuspended = (u: User) => {
+    if (typeof u.suspended === 'boolean') return u.suspended;
     if (typeof u.status === 'string') return u.status.toLowerCase() === 'suspended';
     if (u.suspended_at != null) return true;
-    return !!u.suspended;
+    return false;
   };
 
   const normalizeRole = (role: string | null | undefined) => {
@@ -267,16 +268,24 @@ export default function AdminScreen() {
 
   const loadUsers = async () => {
     try {
+      setLoading(true);
+
       const { data, error } = await supabase
         .from('users')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Load users error:', error);
+        Alert.alert('Error', 'No se pudieron cargar los usuarios');
+        return;
+      }
+
       setUsers(data || []);
     } catch (error) {
-      Alert.alert('Error', 'No se pudieron cargar los usuarios');
-      console.error(error);
+      console.error('Error loading users:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -677,95 +686,114 @@ export default function AdminScreen() {
     }
   };
 
-  const handleSuspendUser = async (userItem: User) => {
-    if (!user) return;
+  const handleToggleSuspend = async (userId: string, currentStatus: boolean) => {
+    try {
+      const action = currentStatus ? 'habilitar' : 'suspender';
 
-    Alert.alert(
-      'Suspender Usuario',
-      `¿Estás seguro que deseas suspender a ${userItem.name}? El usuario no podrá ingresar a la aplicación hasta que sea habilitado.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Suspender',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('users')
-                .update({
-                  status: 'suspended',
-                  suspended_at: new Date().toISOString(),
-                  suspended: true,
-                })
-                .eq('id', userItem.id);
+      Alert.alert(
+        currentStatus ? 'Habilitar Usuario' : 'Suspender Usuario',
+        `¿Estás seguro que deseas ${action} este usuario?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: currentStatus ? 'Habilitar' : 'Suspender',
+            style: currentStatus ? 'default' : 'destructive',
+            onPress: async () => {
+              try {
+                const nextSuspended = !currentStatus;
+                const nowIso = new Date().toISOString();
 
-              if (error) throw error;
+                const previousUser = users.find((u) => u.id === userId) ?? null;
 
-              // Registrar auditoría
-              await logAuditAction(
-                user.id,
-                user.name,
-                'SUSPEND_USER',
-                userItem.id,
-                userItem.name
-              );
+                // Optimistic UI update
+                setUsers((prev) =>
+                  prev.map((u) =>
+                    u.id === userId
+                      ? {
+                          ...u,
+                          suspended: nextSuspended,
+                          status: nextSuspended ? 'suspended' : 'active',
+                          suspended_at: nextSuspended ? nowIso : null,
+                          updated_at: nowIso as any,
+                        }
+                      : u
+                  )
+                );
+                setSelectedUser((prev) => {
+                  if (!prev || prev.id !== userId) return prev;
+                  return {
+                    ...prev,
+                    suspended: nextSuspended,
+                    status: nextSuspended ? 'suspended' : 'active',
+                    suspended_at: nextSuspended ? nowIso : null,
+                  };
+                });
 
-              Alert.alert('Éxito', `Usuario ${userItem.name} suspendido`);
-              await loadStats();
-              await loadUsers();
-            } catch (error) {
-              Alert.alert('Error', 'No se pudo suspender el usuario');
-              console.error(error);
-            }
-          }
-        }
-      ]
-    );
-  };
+                const fullUpdate = {
+                  suspended: nextSuspended,
+                  status: nextSuspended ? 'suspended' : 'active',
+                  suspended_at: nextSuspended ? nowIso : null,
+                  updated_at: nowIso,
+                };
 
-  const handleEnableUser = async (userItem: User) => {
-    if (!user) return;
+                // Intentar update completo (status/suspended_at + suspended) y validar retorno
+                const fullRes = await supabase
+                  .from('users')
+                  .update(fullUpdate as any)
+                  .eq('id', userId)
+                  .select('*');
 
-    Alert.alert(
-      'Habilitar Usuario',
-      `¿Estás seguro que deseas habilitar a ${userItem.name}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Habilitar',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('users')
-                .update({
-                  status: 'active',
-                  suspended_at: null,
-                  suspended: false,
-                })
-                .eq('id', userItem.id);
+                let error: any = fullRes.error;
+                let updatedRow: any = Array.isArray(fullRes.data) ? fullRes.data[0] : fullRes.data;
 
-              if (error) throw error;
+                // Fallback si la tabla no tiene columnas status/suspended_at
+                if (
+                  error &&
+                  (String(error.code) === '42703' || String(error.message || '').toLowerCase().includes('column'))
+                ) {
+                  const minimalRes = await supabase
+                    .from('users')
+                    .update({ suspended: nextSuspended, updated_at: nowIso } as any)
+                    .eq('id', userId)
+                    .select('*');
+                  error = minimalRes.error;
+                  updatedRow = Array.isArray(minimalRes.data) ? minimalRes.data[0] : minimalRes.data;
+                }
 
-              // Registrar auditoría
-              await logAuditAction(
-                user.id,
-                user.name,
-                'ENABLE_USER',
-                userItem.id,
-                userItem.name
-              );
+                if (error || !updatedRow) {
+                  console.error('Supabase error:', error);
 
-              Alert.alert('Éxito', `Usuario ${userItem.name} habilitado`);
-              await loadStats();
-              await loadUsers();
-            } catch (error) {
-              Alert.alert('Error', 'No se pudo habilitar el usuario');
-              console.error(error);
-            }
-          }
-        }
-      ]
-    );
+                  // Revert optimistic update
+                  if (previousUser) {
+                    setUsers((prev) => prev.map((u) => (u.id === userId ? previousUser : u)));
+                    setSelectedUser((prev) => (prev && prev.id === userId ? previousUser : prev));
+                  } else {
+                    void loadUsers();
+                  }
+
+                  Alert.alert(
+                    'Error',
+                    'No se pudo actualizar el usuario. Verifica permisos/RLS en Supabase.'
+                  );
+                  return;
+                }
+
+                // Sync local state with the returned row (source of truth)
+                setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...updatedRow } : u)));
+                setSelectedUser((prev) => (prev && prev.id === userId ? { ...prev, ...updatedRow } : prev));
+
+                Alert.alert('Éxito', `Usuario ${action}do correctamente`);
+              } catch (err) {
+                console.error('Toggle suspend error:', err);
+                Alert.alert('Error', 'Ocurrió un error');
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Error:', error);
+    }
   };
 
   const handleDeleteUser = async (userItem: User) => {
@@ -773,7 +801,7 @@ export default function AdminScreen() {
 
     Alert.alert(
       'Eliminar Usuario',
-      `⚠️ Esta acción eliminará permanentemente a ${userItem.name}. ¿Continuar?`,
+      `Esta acción eliminará permanentemente a ${userItem.name}. ¿Continuar?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -891,7 +919,7 @@ export default function AdminScreen() {
         </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={[styles.title, { color: theme.text }]}>Panel de Administración</Text>
-            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Gestiona la plataforma y modera contenido</Text>
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>GESTIONA LA PLATAFORMA Y MODERA CONTENIDO</Text>
           </View>
         </View>
 
@@ -899,33 +927,24 @@ export default function AdminScreen() {
         <View style={styles.statsContainer}>
           <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
             <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#DBEAFE' }]}>
-              <Ionicons name="people-outline" size={24} color={theme.primary} />
+              <Ionicons name="people" size={24} color={theme.primary} />
           </View>
-            <Text style={[styles.statValue, { color: theme.text }]}>{totalUsers}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Total usuarios</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{users.length}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Total Usuarios</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
             <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#D1FAE5' }]}>
-              <Ionicons name="checkmark-circle-outline" size={24} color="#10B981" />
+              <Ionicons name="checkmark-circle" size={24} color="#10B981" />
             </View>
-            <Text style={[styles.statValue, { color: theme.text }]}>{activeUsers}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Usuarios activos</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{users.filter((u) => !isUserSuspended(u)).length}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Usuarios Activos</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
             <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#FEE2E2' }]}>
-              <Ionicons name="ban-outline" size={24} color="#EF4444" />
+              <Ionicons name="close-circle" size={24} color="#EF4444" />
             </View>
-            <Text style={[styles.statValue, { color: theme.text }]}>{suspendedUsers}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Usuarios suspendidos</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: theme.card, shadowOpacity: resolvedMode === 'dark' ? 0 : 0.05 }]}>
-            <View style={[styles.statIconContainer, { backgroundColor: resolvedMode === 'dark' ? theme.border : '#FEF3C7' }]}>
-              <Ionicons name="card-outline" size={24} color="#F59E0B" />
-            </View>
-            <Text style={[styles.statValue, { color: theme.text }]}>
-              {totalPayments}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Total pagos</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{users.filter((u) => isUserSuspended(u)).length}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Usuarios Suspendidos</Text>
           </View>
         </View>
 
@@ -1034,6 +1053,49 @@ export default function AdminScreen() {
                           <Text style={[styles.roleText, { color: getRoleColor(userItem.role) }]}>
                             {getRoleLabel(userItem.role)}
                           </Text>
+                        </View>
+
+                        <View style={styles.actionButtonsContainer}>
+                          <TouchableOpacity
+                            style={[
+                              styles.actionButton,
+                              isUserSuspended(userItem) ? styles.enableButton : styles.suspendButton,
+                            ]}
+                            onPress={(e) => {
+                              (e as any)?.stopPropagation?.();
+                              handleToggleSuspend(userItem.id, isUserSuspended(userItem));
+                            }}
+                          >
+                            <Text style={styles.actionButtonText}>
+                              {isUserSuspended(userItem) ? 'Habilitar' : 'Suspender'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <View
+                            style={[
+                              styles.userStatItem,
+                              {
+                                backgroundColor: isUserSuspended(userItem) ? '#FEE2E2' : '#D1FAE5',
+                                paddingHorizontal: 8,
+                                paddingVertical: 4,
+                                borderRadius: 8,
+                              },
+                            ]}
+                          >
+                            <Ionicons
+                              name={isUserSuspended(userItem) ? 'close-circle' : 'checkmark-circle'}
+                              size={14}
+                              color={isUserSuspended(userItem) ? '#991B1B' : '#065F46'}
+                            />
+                            <Text
+                              style={[
+                                styles.userStatText,
+                                { color: isUserSuspended(userItem) ? '#991B1B' : '#065F46' },
+                              ]}
+                            >
+                              {isUserSuspended(userItem) ? 'Suspendido' : 'Activo'}
+                            </Text>
+                          </View>
                         </View>
                         <Text style={[styles.userEmail, { color: theme.textSecondary }]}>{userItem.email}</Text>
 
@@ -1591,7 +1653,7 @@ export default function AdminScreen() {
                          ]}
                          onPress={() => {
                            setShowViewModal(false);
-                           handleEnableUser(selectedUser);
+                           handleToggleSuspend(selectedUser.id, true);
                          }}
                        >
                          <Ionicons name="checkmark-circle-outline" size={20} color="#10B981" />
@@ -1607,7 +1669,7 @@ export default function AdminScreen() {
                          ]}
                          onPress={() => {
                            setShowViewModal(false);
-                           handleSuspendUser(selectedUser);
+                           handleToggleSuspend(selectedUser.id, false);
                          }}
                        >
                          <Ionicons name="ban-outline" size={20} color="#EF4444" />

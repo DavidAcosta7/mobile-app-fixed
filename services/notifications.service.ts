@@ -229,7 +229,7 @@ export class NotificationService {
       notify3Days.setDate(notify3Days.getDate() - 3);
       notify3Days.setHours(9, 0, 0, 0);
       if (notify3Days > today) {
-        await this.scheduleOne(payment, userId, '3_days', '⏰ Pago próximo en 3 días', `${payment.name} - $${payment.amount}`, notify3Days);
+        await this.scheduleOne(payment, userId, '3_days', 'Pago próximo en 3 días', `${payment.name} - $${payment.amount}`, notify3Days);
       }
     }
 
@@ -238,7 +238,7 @@ export class NotificationService {
       notify2Days.setDate(notify2Days.getDate() - 2);
       notify2Days.setHours(9, 0, 0, 0);
       if (notify2Days > today) {
-        await this.scheduleOne(payment, userId, '2_days', '⏰ Pago próximo en 2 días', `${payment.name} - $${payment.amount}`, notify2Days);
+        await this.scheduleOne(payment, userId, '2_days', 'Pago próximo en 2 días', `${payment.name} - $${payment.amount}`, notify2Days);
       }
     }
 
@@ -247,7 +247,7 @@ export class NotificationService {
       notify1Day.setDate(notify1Day.getDate() - 1);
       notify1Day.setHours(9, 0, 0, 0);
       if (notify1Day > today) {
-        await this.scheduleOne(payment, userId, '1_day', '⚠️ Pago mañana', `${payment.name} - $${payment.amount}`, notify1Day);
+        await this.scheduleOne(payment, userId, '1_day', 'Pago mañana', `${payment.name} - $${payment.amount}`, notify1Day);
       }
     }
 
@@ -346,7 +346,7 @@ export class NotificationService {
 
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: '🔴 ¡Pago HOY!',
+          title: '¡Pago HOY!',
           body: `${payment.name} vence hoy - $${payment.amount}`,
           data: {
             paymentId: payment.id,

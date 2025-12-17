@@ -1,0 +1,18 @@
+export const COLOMBIAN_BANKS = [
+  { id: 'bancolombia', name: 'Bancolombia', packageName: 'com.todo1.mobile' },
+  { id: 'nequi', name: 'Nequi', packageName: 'com.nequi.MobileApp' },
+  { id: 'daviplata', name: 'Daviplata', packageName: 'com.daviplata.mobile' },
+  { id: 'nubank', name: 'Nu Colombia', packageName: 'com.nu.production' },
+  { id: 'lulo', name: 'Lulo Bank', packageName: 'com.lulobank' },
+  { id: 'davivienda', name: 'Davivienda', packageName: 'com.davivienda.movilapp' },
+  { id: 'bogota', name: 'Banco de Bogotá', packageName: 'com.bancodebogota.bancamovil' },
+  { id: 'bbva', name: 'BBVA Colombia', packageName: 'com.bbva.colombia' },
+  { id: 'popular', name: 'Banco Popular', packageName: 'co.com.popular.app' },
+  { id: 'occidente', name: 'Banco de Occidente', packageName: 'co.com.grupobancolombia.occidente' },
+  { id: 'colpatria', name: 'Colpatria', packageName: 'com.colpatria.appdigital' },
+  { id: 'av_villas', name: 'AV Villas', packageName: 'com.avvillas.bancamovil' },
+  { id: 'movii', name: 'Movii', packageName: 'com.movii.app' },
+  { id: 'dale', name: 'Dale!', packageName: 'com.dale.app' },
+  { id: 'rappipay', name: 'RappiPay', packageName: 'com.grability.rappipay' },
+  { id: 'pse', name: 'PSE', packageName: 'co.pse.app.android' },
+];

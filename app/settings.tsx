@@ -1,4 +1,5 @@
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header } from '../components/Header';
 import { useTheme } from '../contexts/ThemeContext';
@@ -13,7 +14,10 @@ export default function SettingsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header />
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.title, { color: colors.text }]}>⚙️ Configuración</Text>
+        <View style={styles.titleRow}>
+          <Ionicons name="settings-outline" size={24} color={colors.text} />
+          <Text style={[styles.title, { color: colors.text }]}>Configuración</Text>
+        </View>
 
         {isAdmin && (
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -23,12 +27,12 @@ export default function SettingsScreen() {
               onPress={() => router.push('/admin')}
               activeOpacity={0.8}
             >
-              <Text style={styles.menuIcon}>🛡️</Text>
+              <Ionicons name="shield-checkmark-outline" size={24} color={colors.text} style={styles.menuIcon} />
               <View style={styles.menuInfo}>
                 <Text style={[styles.menuTitle, { color: colors.text }]}>Panel de Administración</Text>
                 <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>Gestiona usuarios, auditoría y reportes</Text>
               </View>
-              <Text style={[styles.menuArrow, { color: colors.textSecondary }]}>›</Text>
+              <Ionicons name="chevron-forward" size={24} color={colors.textSecondary} style={styles.menuArrow} />
             </TouchableOpacity>
           </View>
         )}
@@ -41,12 +45,12 @@ export default function SettingsScreen() {
             onPress={() => router.push('/notification-preferences')}
             activeOpacity={0.8}
           >
-            <Text style={styles.menuIcon}>🔔</Text>
+            <Ionicons name="notifications-outline" size={24} color={colors.text} style={styles.menuIcon} />
             <View style={styles.menuInfo}>
               <Text style={[styles.menuTitle, { color: colors.text }]}>Preferencias de Notificaciones</Text>
               <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>Configura cuándo recibir recordatorios</Text>
             </View>
-            <Text style={[styles.menuArrow, { color: colors.textSecondary }]}>›</Text>
+            <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} style={styles.menuArrow} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -54,12 +58,12 @@ export default function SettingsScreen() {
             onPress={() => router.push('/notifications-history')}
             activeOpacity={0.8}
           >
-            <Text style={styles.menuIcon}>📜</Text>
+            <Ionicons name="time-outline" size={24} color={colors.text} style={styles.menuIcon} />
             <View style={styles.menuInfo}>
               <Text style={[styles.menuTitle, { color: colors.text }]}>Historial de Notificaciones</Text>
               <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>Ver todas las notificaciones enviadas</Text>
             </View>
-            <Text style={[styles.menuArrow, { color: colors.textSecondary }]}>›</Text>
+            <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} style={styles.menuArrow} />
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -74,10 +78,15 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 20,
   },
   card: {
     borderRadius: 12,
@@ -102,7 +111,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   menuIcon: {
-    fontSize: 24,
     marginRight: 12,
     width: 32,
   },
@@ -118,6 +126,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   menuArrow: {
-    fontSize: 24,
+    width: 24,
+    height: 24,
   },
 });

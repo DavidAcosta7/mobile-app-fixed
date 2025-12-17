@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -78,7 +79,7 @@ export default function RegisterPage() {
         {/* Logo/Header */}
         <View style={styles.header}>
           <View style={styles.logoContainer}>
-            <Text style={styles.logoIcon}>💳</Text>
+            <Ionicons name="card" size={40} color="#FFFFFF" style={styles.logoIcon} />
           </View>
           <Text style={styles.title}>FLUXPAY</Text>
           <Text style={styles.subtitle}>Crea tu cuenta y gestiona tus pagos</Text>
@@ -205,7 +206,8 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   logoIcon: {
-    fontSize: 40,
+    width: 40,
+    height: 40,
   },
   title: {
     fontSize: 32,

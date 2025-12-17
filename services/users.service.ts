@@ -6,6 +6,7 @@ export interface User {
   name: string;
   phone?: string | null;
   photo_url?: string | null;
+  avatar_url?: string | null;
   role: 'USER' | 'ADMIN';
   email_verified: boolean;
   first_login: boolean;
@@ -54,6 +55,7 @@ export const userService = {
     name: string;
     phone?: string;
     photo_url?: string;
+    avatar_url?: string;
     role?: 'USER' | 'ADMIN';
   }): Promise<User> {
     const { data: user, error } = await supabase
@@ -64,6 +66,7 @@ export const userService = {
         name: data.name,
         phone: data.phone,
         photo_url: data.photo_url,
+        avatar_url: data.avatar_url ?? data.photo_url,
         role: data.role || 'USER',
         email_verified: false,
         first_login: true,

@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Header } from '../components/Header';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
@@ -46,18 +47,18 @@ export default function NotificationsHistoryScreen() {
     void loadHistory();
   };
 
-  const getNotificationIcon = (type: string) => {
+  const getNotificationIcon = (type: string): keyof typeof Ionicons.glyphMap => {
     switch (type) {
       case '3_days':
-        return '⏰';
+        return 'time-outline';
       case '2_days':
-        return '⏰';
+        return 'time-outline';
       case '1_day':
-        return '⚠️';
+        return 'alert-circle-outline';
       case 'same_day':
-        return '🔴';
+        return 'alert-circle';
       default:
-        return '🔔';
+        return 'notifications-outline';
     }
   };
 
@@ -128,11 +129,14 @@ export default function NotificationsHistoryScreen() {
           />
         }
       >
-        <Text style={[styles.title, { color: colors.text }]}>📜 Historial de Notificaciones</Text>
+        <View style={styles.titleRow}>
+          <Ionicons name="time-outline" size={24} color={colors.text} />
+          <Text style={[styles.title, { color: colors.text }]}>Historial de Notificaciones</Text>
+        </View>
 
         {notifications.length === 0 ? (
           <View style={[styles.emptyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={styles.emptyIcon}>🔕</Text>
+            <Ionicons name="notifications-off-outline" size={56} color={colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No hay notificaciones</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Aquí aparecerán todas las notificaciones que FluxPay te ha enviado</Text>
           </View>
@@ -151,7 +155,7 @@ export default function NotificationsHistoryScreen() {
                 ]}
               >
                 <View style={styles.notificationHeader}>
-                  <Text style={styles.notificationIcon}>{getNotificationIcon(notification.type)}</Text>
+                  <Ionicons name={getNotificationIcon(notification.type)} size={22} color={colors.primary} />
                   <View style={styles.notificationInfo}>
                     <Text style={[styles.notificationTitle, { color: colors.text }]}>
                       {notification.title}
@@ -190,6 +194,12 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -198,17 +208,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 20,
   },
   emptyContainer: {
     borderRadius: 16,
     padding: 40,
     alignItems: 'center',
     borderWidth: 1,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
   },
   emptyTitle: {
     fontSize: 20,
@@ -237,9 +242,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 12,
-  },
-  notificationIcon: {
-    fontSize: 24,
   },
   notificationInfo: {
     flex: 1,

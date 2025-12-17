@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, Alert, Modal, TextInput, TouchableOpacity, ActivityIndicator, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
@@ -15,7 +16,7 @@ import { format } from 'date-fns';
 import { achievementService, Achievement } from '../services/achievements.service';
 import { useTheme } from '../contexts/ThemeContext';
 import { NotificationService } from '../services/notifications.service';
-import { useAppPicker } from '../hooks/useAppPicker';
+import { COLOMBIAN_BANKS } from '../constants/banks';
 
 // Helper function to map emojis or icon names to valid Ionicons names
 const getIconName = (icon: string | null | undefined): keyof typeof Ionicons.glyphMap => {
@@ -23,26 +24,26 @@ const getIconName = (icon: string | null | undefined): keyof typeof Ionicons.gly
   
   // Map emojis to Ionicons
   const emojiMap: Record<string, keyof typeof Ionicons.glyphMap> = {
-    '💳': 'card',
-    '🤙': 'call',
-    '📱': 'phone-portrait',
-    '💡': 'bulb',
-    '🎵': 'musical-notes',
-    '🏠': 'home',
-    '🚗': 'car',
-    '🍔': 'restaurant',
-    '⚡': 'flash',
-    '💰': 'cash',
-    '🛒': 'cart',
-    '🏥': 'medical',
-    '🎮': 'game-controller',
-    '👕': 'shirt',
-    '🎓': 'school',
-    '✈️': 'airplane',
-    '🏋️': 'barbell',
-    '🎬': 'film',
-    '📚': 'library',
-    '🎨': 'color-palette',
+    '\u{1F4B3}': 'card',
+    '\u{1F919}': 'call',
+    '\u{1F4F1}': 'phone-portrait',
+    '\u{1F4A1}': 'bulb',
+    '\u{1F3B5}': 'musical-notes',
+    '\u{1F3E0}': 'home',
+    '\u{1F697}': 'car',
+    '\u{1F354}': 'restaurant',
+    '\u26A1': 'flash',
+    '\u{1F4B0}': 'cash',
+    '\u{1F6D2}': 'cart',
+    '\u{1F3E5}': 'medical',
+    '\u{1F3AE}': 'game-controller',
+    '\u{1F455}': 'shirt',
+    '\u{1F393}': 'school',
+    '\u2708\uFE0F': 'airplane',
+    '\u{1F3CB}\uFE0F': 'barbell',
+    '\u{1F3AC}': 'film',
+    '\u{1F4DA}': 'library',
+    '\u{1F3A8}': 'color-palette',
   };
   
   // If it's an emoji, map it
@@ -65,7 +66,6 @@ export default function DashboardScreen() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
   const { theme: colors, resolvedMode } = useTheme();
-  const { pickApp, openApp } = useAppPicker();
   const [activeTab, setActiveTab] = useState('Todos');
   const [showModal, setShowModal] = useState(false);
   const [payments, setPayments] = useState<any[]>([]);
@@ -244,6 +244,7 @@ export default function DashboardScreen() {
             icon: 'card',
             payment_url: deepLink ? null : paymentUrl,
             deep_link: paymentUrl ? '' : deepLink,
+            app_name: selectedAppName || null,
           })
           .eq('id', editingPayment.id)
           .select()
@@ -279,6 +280,7 @@ export default function DashboardScreen() {
             auto_debit: false,
             payment_url: deepLink ? null : paymentUrl,
             deep_link: paymentUrl ? '' : deepLink,
+            app_name: selectedAppName || null,
           })
           .select()
           .single();
@@ -364,72 +366,54 @@ export default function DashboardScreen() {
     setEditingPayment(payment);
     setPaymentName(payment.name);
     setAmount(payment.amount.toString());
-    setCurrency(payment.currency);
+    setDueDateDate(new Date(payment.due_date));
     setCategory(payment.category);
     setPaymentUrl(payment.payment_url || '');
     setDeepLink(payment.deep_link || '');
-    if (payment.deep_link) {
-      const parts = String(payment.deep_link).split('.');
-      setSelectedAppName(parts[parts.length - 1] || String(payment.deep_link));
-    } else {
-      setSelectedAppName('');
-    }
-    const date = new Date(payment.due_date);
-    const localDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
-    setDueDateDate(localDay);
+    setSelectedAppName(payment.app_name || '');
     setShowModal(true);
-  };
-
-  const handleDeletePayment = (payment: any) => {
-    Alert.alert(
-      'Eliminar Pago',
-      `¿Estás seguro que deseas eliminar "${payment.name}"?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await NotificationService.cancelPaymentNotifications(payment.id);
-
-              const { error } = await supabase
-                .from('payments')
-                .delete()
-                .eq('id', payment.id);
-
-              if (error) throw error;
-
-              Alert.alert('Éxito', 'Pago eliminado');
-              loadPayments();
-            } catch (error) {
-              Alert.alert('Error', 'No se pudo eliminar el pago');
-            }
-          }
-        }
-      ]
-    );
   };
 
   const handlePayment = async (payment: any) => {
     try {
+      // Si tiene app configurada
       if (payment.deep_link) {
-        const success = await openApp(payment.deep_link);
-        if (!success && payment.payment_url) {
-          Alert.alert('App no disponible', '¿Deseas abrir el link web alternativo?', [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-              text: 'Abrir Web',
-              onPress: () => {
-                void Linking.openURL(payment.payment_url);
-              },
-            },
-          ]);
-        }
-        return;
-      }
+        const packageName = payment.deep_link;
 
-      if (payment.payment_url) {
+        try {
+          await IntentLauncher.openApplication(packageName);
+          return;
+        } catch (error) {
+          // Si falla, intentar con Linking
+          try {
+            const canOpen = await Linking.canOpenURL(`package:${packageName}`);
+            if (canOpen) {
+              await Linking.openURL(`package:${packageName}`);
+              return;
+            }
+          } catch (e) {
+            console.error('Linking error:', e);
+          }
+
+          // App no instalada
+          Alert.alert(
+            'App no instalada',
+            `La aplicación ${payment.app_name || 'bancaria'} no está instalada en tu teléfono.`,
+            [
+              { text: 'OK', style: 'cancel' },
+              payment.payment_url
+                ? {
+                    text: 'Abrir URL web',
+                    onPress: () => Linking.openURL(payment.payment_url),
+                  }
+                : null,
+            ].filter(Boolean) as any
+          );
+          return;
+        }
+      }
+      // Si tiene URL web
+      else if (payment.payment_url) {
         const canOpen = await Linking.canOpenURL(payment.payment_url);
         if (canOpen) {
           await Linking.openURL(payment.payment_url);
@@ -439,11 +423,42 @@ export default function DashboardScreen() {
         return;
       }
 
+      // Sin configurar
       Alert.alert('Sin configurar', 'Edita este pago para configurar un método de pago');
     } catch (error) {
       console.error('Payment error:', error);
       Alert.alert('Error', 'No se pudo abrir el método de pago');
     }
+  };
+
+  const handleDeletePayment = async (payment: any) => {
+    Alert.alert(
+      'Eliminar pago',
+      `¿Eliminar "${payment.name}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              await NotificationService.cancelPaymentNotifications(payment.id);
+
+              const { error } = await supabase.from('payments').delete().eq('id', payment.id);
+              if (error) throw error;
+
+              await loadPayments();
+            } catch (e) {
+              console.error('Error deleting payment:', e);
+              Alert.alert('Error', 'No se pudo eliminar el pago');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const filteredPayments = payments.filter((payment) => {
@@ -545,7 +560,8 @@ export default function DashboardScreen() {
               onPress={() => setShowModal(true)}
               activeOpacity={0.8}
             >
-              <Text style={styles.addButtonText}>+ Agregar</Text>
+              <Ionicons name="add" size={20} color="#FFFFFF" />
+              <Text style={styles.addButtonText}>Agregar</Text>
             </TouchableOpacity>
           </View>
 
@@ -609,7 +625,8 @@ export default function DashboardScreen() {
                     style={[styles.payButton, { backgroundColor: colors.primary }]}
                     onPress={() => handlePayment(payment)}
                   >
-                    <Text style={styles.payButtonText}> Pagar</Text>
+                    <Ionicons name="card-outline" size={18} color="#FFFFFF" />
+                    <Text style={styles.payButtonText}>Pagar</Text>
                   </TouchableOpacity>
                 </Card>
               ))}
@@ -686,7 +703,7 @@ export default function DashboardScreen() {
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {isFirstLogin 
-                  ? '¡Bienvenido a FluxPay! 👋' 
+                  ? '¡Bienvenido a FluxPay!' 
                   : editingPayment 
                     ? 'Editar Pago' 
                     : 'Agregar Nuevo Pago'}
@@ -703,7 +720,7 @@ export default function DashboardScreen() {
                   setDeepLink('');
                   setSelectedAppName('');
                 }}>
-                  <Text style={[styles.modalClose, { color: colors.textSecondary }]}>✕</Text>
+                  <Ionicons name="close" size={22} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -783,9 +800,12 @@ export default function DashboardScreen() {
                   }}
                 />
               )}
-              <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                ℹ️ La fecha se ajustará automáticamente al último día del mes
-              </Text>
+              <View style={styles.inputHintRow}>
+                <Ionicons name="information-circle-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
+                  La fecha se ajustará automáticamente al último día del mes
+                </Text>
+              </View>
 
               {/* Categoría */}
               <Text style={[styles.inputLabel, { color: colors.text }]}>
@@ -808,7 +828,10 @@ export default function DashboardScreen() {
               </View>
 
               {/* Configurar Método de Pago */}
-              <Text style={styles.sectionHeaderText}>💳 Método de pago</Text>
+              <View style={styles.sectionHeaderRow}>
+                <Ionicons name="card-outline" size={18} color={colors.text} />
+                <Text style={[styles.sectionHeaderText, { color: colors.text }]}>Método de pago</Text>
+              </View>
 
               {/* Opción 1: Link Web */}
               <TouchableOpacity 
@@ -825,7 +848,7 @@ export default function DashboardScreen() {
                   );
                 }}
               >
-                <Text style={styles.paymentMethodIcon}>🌐</Text>
+                <Ionicons name="globe-outline" size={28} color={colors.text} style={styles.paymentMethodIcon} />
                 <View style={styles.paymentMethodInfo}>
                   <Text style={[styles.paymentMethodTitle, { color: colors.text }]}>Link Web (URL)</Text>
                   <Text style={[styles.paymentMethodDesc, { color: colors.textSecondary }]}>
@@ -834,54 +857,103 @@ export default function DashboardScreen() {
                 </View>
                 {paymentUrl && (
                   <TouchableOpacity onPress={() => setPaymentUrl('')}>
-                    <Text style={styles.clearIcon}>✕</Text>
+                    <Ionicons name="close-circle" size={24} color="#EF4444" />
                   </TouchableOpacity>
                 )}
               </TouchableOpacity>
 
-              {/* Opción 2: Seleccionar App */}
-              <TouchableOpacity 
+              {/* Selector de App Bancaria */}
+              <Text style={[styles.inputLabel, { color: colors.text, marginTop: 16 }]}>Aplicación bancaria para pagar</Text>
+
+              <TouchableOpacity
                 style={[
-                  styles.paymentMethodButton,
+                  styles.bankSelector,
                   {
                     backgroundColor: colors.card,
                     borderColor: deepLink ? colors.primary : colors.border,
                     borderWidth: 2,
                   },
                 ]}
-                onPress={async () => {
-                  const app = await pickApp({
-                    initialPackageName: deepLink,
-                    promptPackageName: (title, message, initialValue, onSave) => {
-                      promptText(title, message, initialValue, onSave);
-                    },
-                  });
-
-                  if (app) {
-                    setDeepLink(app.packageName);
-                    setSelectedAppName(app.appName);
-                    setPaymentUrl('');
-                  }
+                onPress={() => {
+                  Alert.alert(
+                    'Seleccionar App Bancaria',
+                    'Elige la aplicación que se abrirá al presionar "Pagar"',
+                    [
+                      ...COLOMBIAN_BANKS.map((bank) => ({
+                        text: bank.name,
+                        onPress: () => {
+                          setDeepLink(bank.packageName);
+                          setSelectedAppName(bank.name);
+                          setPaymentUrl('');
+                        },
+                      })),
+                      {
+                        text: 'Package personalizado',
+                        onPress: () => {
+                          promptText(
+                            'Package Name',
+                            'Ingresa el package name (ej: com.banco.app)',
+                            deepLink,
+                            (text) => {
+                              const value = (text || '').trim();
+                              if (value && value.includes('.')) {
+                                setDeepLink(value);
+                                setSelectedAppName(value);
+                                setPaymentUrl('');
+                              } else {
+                                Alert.alert('Error', 'Package name inválido');
+                              }
+                            }
+                          );
+                        },
+                      },
+                      { text: 'Cancelar', style: 'cancel' },
+                    ]
+                  );
                 }}
               >
-                <Text style={styles.paymentMethodIcon}>📱</Text>
-                <View style={styles.paymentMethodInfo}>
-                  <Text style={[styles.paymentMethodTitle, { color: colors.text }]}>Aplicación del Teléfono</Text>
-                  <Text style={[styles.paymentMethodDesc, { color: colors.textSecondary }]}>
-                    {selectedAppName || deepLink || 'Toca para seleccionar una app'}
-                  </Text>
+                <View style={styles.bankSelectorContent}>
+                  <Ionicons
+                    name="phone-portrait"
+                    size={24}
+                    color={deepLink ? colors.primary : colors.textSecondary}
+                  />
+                  <View style={styles.bankSelectorText}>
+                    <Text style={[styles.bankSelectorName, { color: colors.text }]}>
+                      {selectedAppName || 'Seleccionar app bancaria'}
+                    </Text>
+                    {deepLink ? (
+                      <Text
+                        style={[styles.bankSelectorPackage, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {deepLink}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {deepLink ? (
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setDeepLink('');
+                        setSelectedAppName('');
+                      }}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Ionicons name="close-circle" size={24} color="#EF4444" />
+                    </TouchableOpacity>
+                  ) : (
+                    <Ionicons name="chevron-down" size={24} color={colors.textSecondary} />
+                  )}
                 </View>
-                {deepLink && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setDeepLink('');
-                      setSelectedAppName('');
-                    }}
-                  >
-                    <Text style={styles.clearIcon}>✕</Text>
-                  </TouchableOpacity>
-                )}
               </TouchableOpacity>
+
+              <View style={styles.bankHintRow}>
+                <Ionicons name="bulb-outline" size={16} color={colors.textSecondary} />
+                <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
+                  La app seleccionada se abrirá al presionar "Pagar"
+                </Text>
+              </View>
 
               {/* Botones */}
               <View style={styles.modalButtons}>
@@ -971,6 +1043,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   addButtonText: {
     color: '#FFFFFF',
@@ -1108,9 +1183,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inputHint: {
-    fontSize: 12,
-    marginTop: -12,
+    fontSize: 13,
     marginBottom: 16,
+  },
+  bankSelector: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+  },
+  bankSelectorContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  bankSelectorText: {
+    flex: 1,
+  },
+  bankSelectorName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  bankSelectorPackage: {
+    fontSize: 12,
+  },
+  bankHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1193,7 +1293,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   paymentMethodIcon: {
-    fontSize: 32,
     marginRight: 12,
   },
   paymentMethodInfo: {
@@ -1273,6 +1372,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 8,
     marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
   },
   payButtonText: {
     color: '#FFFFFF',
@@ -1280,12 +1383,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  inputHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 20,
+    marginBottom: 4,
+  },
   sectionHeaderText: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#111827',
-    marginTop: 20,
-    marginBottom: 4,
   },
   sectionSubtitle: {
     fontSize: 13,

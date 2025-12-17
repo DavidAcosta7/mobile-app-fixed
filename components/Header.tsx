@@ -22,6 +22,7 @@ export function Header() {
   const displayEmail = user?.email || '';
   const level = user?.financial_level ?? 1;
   const xp = user?.experience_points ?? 0;
+  const avatarUrl = (user as any)?.avatar_url as string | undefined;
 
   return (
     <SafeAreaView
@@ -82,9 +83,13 @@ export function Header() {
           }}
         >
           <View style={[styles.avatar, { backgroundColor: theme.primary }]}>
-            <Text style={styles.avatarText}>
-              {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
-            </Text>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>
+                {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
+              </Text>
+            )}
           </View>
         </TouchableOpacity>
       </View>
@@ -232,9 +237,13 @@ export function Header() {
               {/* Header del Menu */}
               <View style={[styles.menuHeader, { borderBottomColor: theme.border }] }>
                 <View style={[styles.menuAvatar, { backgroundColor: theme.primary }]}>
-                  <Text style={styles.menuAvatarText}>
-                    {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
-                  </Text>
+                  {avatarUrl ? (
+                    <Image source={{ uri: avatarUrl }} style={styles.menuAvatarImage} />
+                  ) : (
+                    <Text style={styles.menuAvatarText}>
+                      {displayName.charAt(0) || displayEmail.charAt(0) || 'U'}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.menuUserInfo}>
                   <Text style={[styles.menuUserName, { color: theme.text }]}>
@@ -291,7 +300,7 @@ export function Header() {
                     router.push('/notifications-history');
                   }}
                 >
-                  <Text style={styles.menuItemIcon}>📜</Text>
+                  <Ionicons name="time-outline" size={24} color={theme.text} style={styles.menuItemIcon} />
                   <Text style={[styles.menuItemText, { color: theme.text }]}>Historial de notificaciones</Text>
                 </TouchableOpacity>
 
@@ -420,6 +429,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   avatarText: {
     color: '#FFFFFF',
@@ -458,6 +472,11 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  menuAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   menuAvatarText: {
     color: '#FFFFFF',
@@ -503,7 +522,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   menuItemIcon: {
-    fontSize: 20,
     width: 24,
   },
   menuItemText: {

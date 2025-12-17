@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Header } from '../components/Header';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
@@ -169,7 +170,10 @@ export default function NotificationPreferencesScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header />
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.title, { color: colors.text }]}>🔔 Preferencias de Notificaciones</Text>
+        <View style={styles.titleRow}>
+          <Ionicons name="notifications-outline" size={24} color={colors.text} />
+          <Text style={[styles.title, { color: colors.text }]}>Preferencias de Notificaciones</Text>
+        </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.switchRow, { borderBottomColor: colors.border }]}>
@@ -192,7 +196,10 @@ export default function NotificationPreferencesScreen() {
         {enabled && (
           <>
             <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.cardTitle, { color: colors.text }]}>📅 Días de Anticipación</Text>
+              <View style={styles.cardTitleRow}>
+                <Ionicons name="calendar-outline" size={20} color={colors.text} />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Días de Anticipación</Text>
+              </View>
               <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
                 Elige con cuántos días de anticipación quieres ser notificado
               </Text>
@@ -241,7 +248,10 @@ export default function NotificationPreferencesScreen() {
             </View>
 
             <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.cardTitle, { color: colors.text }]}>🔴 Notificaciones el Mismo Día</Text>
+              <View style={styles.cardTitleRow}>
+                <Ionicons name="alert-circle-outline" size={20} color={colors.text} />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Notificaciones el Mismo Día</Text>
+              </View>
               <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
                 Recordatorios frecuentes el día del vencimiento
               </Text>
@@ -267,10 +277,13 @@ export default function NotificationPreferencesScreen() {
                   disabled={saving}
                 >
                   <View style={styles.intervalInfo}>
-                    <Text style={[styles.intervalLabel, { color: colors.text }]}>⏱️ Frecuencia de Recordatorios</Text>
+                    <View style={styles.intervalLabelRow}>
+                      <Ionicons name="time-outline" size={18} color={colors.text} />
+                      <Text style={[styles.intervalLabel, { color: colors.text }]}>Frecuencia de Recordatorios</Text>
+                    </View>
                     <Text style={[styles.intervalValue, { color: colors.primary }]}>Cada {sameDayInterval} minutos</Text>
                   </View>
-                  <Text style={[styles.intervalArrow, { color: colors.textSecondary }]}>›</Text>
+                  <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} style={styles.intervalArrow} />
                 </TouchableOpacity>
               )}
             </View>
@@ -285,7 +298,7 @@ export default function NotificationPreferencesScreen() {
                 },
               ]}
             >
-              <Text style={styles.infoIcon}>💡</Text>
+              <Ionicons name="bulb-outline" size={22} color={colors.text} style={styles.infoIcon} />
               <View style={styles.infoContent}>
                 <Text style={[styles.infoTitle, { color: colors.text }]}>¿Cómo funciona?</Text>
                 <Text style={[styles.infoText, { color: colors.textSecondary }]}>Las notificaciones se programan automáticamente cuando agregas o editas un pago. Si cambias estas preferencias, se aplicarán reprogramando todos tus pagos.</Text>
@@ -307,6 +320,12 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -315,7 +334,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 20,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 4,
   },
   card: {
     borderRadius: 12,
@@ -331,7 +355,6 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 4,
   },
   cardSubtitle: {
     fontSize: 14,
@@ -368,17 +391,23 @@ const styles = StyleSheet.create({
   intervalInfo: {
     flex: 1,
   },
+  intervalLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
   intervalLabel: {
     fontSize: 15,
     fontWeight: '600',
-    marginBottom: 4,
   },
   intervalValue: {
     fontSize: 14,
     fontWeight: 'bold',
   },
   intervalArrow: {
-    fontSize: 24,
+    width: 24,
+    height: 24,
   },
   infoCard: {
     flexDirection: 'row',
@@ -389,7 +418,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   infoIcon: {
-    fontSize: 24,
+    width: 24,
+    height: 24,
   },
   infoContent: {
     flex: 1,
